@@ -1,0 +1,73 @@
+{% extends "scheduler/base.html" %}
+{% block title %}首页 - 排班系统{% endblock %}
+{% block content %}
+<h4 class="page-title">首页</h4>
+
+<div class="glass-card">
+    <div class="card-title">🚀 使用流程</div>
+    <div class="row g-4">
+        <div class="col-md-4">
+            <div class="text-center p-3">
+                <div style="font-size:2.4rem;">📥</div>
+                <h6 class="mt-2 fw-bold">1. 导入人员</h6>
+                <p class="text-muted-light mb-0">粘贴「班组-姓名-岗位1,岗位2-已上班数-应上班数」<br>一个人可多岗，岗位自动去重</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="text-center p-3">
+                <div style="font-size:2.4rem;">👥</div>
+                <h6 class="mt-2 fw-bold">2. 班组管理</h6>
+                <p class="text-muted-light mb-0">点班组看存储的约束：应上人数 · 岗位条件<br>连休范围 · 最少班数/豁免，一键生成排班</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="text-center p-3">
+                <div style="font-size:2.4rem;">📅</div>
+                <h6 class="mt-2 fw-bold">3. 班次展示</h6>
+                <p class="text-muted-light mb-0">日历显示每天每班次人数（按班组分层）<br>点班次看明细，点人名改班，全表联动</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="glass-card">
+            <div class="card-title">🛌 系统内置休息规则（硬性保证）</div>
+            <ul class="mb-0 fs-6">
+                <li class="mb-2">任意 <b>10</b> 天内最多上 <b>6</b> 班 —— 每 10 天至少休 4 天（每月最多 18 班，即 3×6=18）。</li>
+                <li class="mb-0">休息必须<b>多天连休</b>：连续休息 <b>2 ~ 4</b> 天，不允许单休、不允许连休超过 4 天（含月初/月末）。</li>
+            </ul>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="glass-card">
+            <div class="card-title">📊 当前数据</div>
+            <div class="d-flex justify-content-around text-center py-2">
+                <div>
+                    <div class="fs-3 fw-bold text-primary">{{ person_count }}</div>
+                    <div class="text-muted-light">人员</div>
+                </div>
+                <div>
+                    <div class="fs-3 fw-bold text-success">{{ team_count }}</div>
+                    <div class="text-muted-light">班组</div>
+                </div>
+                <div>
+                    <div class="fs-3 fw-bold text-warning">{{ schedule_count }}</div>
+                    <div class="text-muted-light">排班记录</div>
+                </div>
+            </div>
+            {% if recent %}
+            <hr class="my-2">
+            <div class="text-muted-light small mb-1">最近排班：</div>
+            {% for r in recent %}
+            <a class="d-block py-1 text-decoration-none" href="{% url 'scheduler:schedule_result' r.id %}">
+                📋 {{ r.year }}-{{ r.month|stringformat:"02d" }} 排班
+                <span class="text-muted-light small">（{{ r.created_at|date:"m-d H:i" }}）</span>
+            </a>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

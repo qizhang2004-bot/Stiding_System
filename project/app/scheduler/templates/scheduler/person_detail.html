@@ -1,0 +1,132 @@
+{% extends "scheduler/base.html" %}
+{% block title %}个人日历 - {{ person.name }}{% endblock %}
+{% block content %}
+<h4 class="page-title">{{ person.name }} 的出勤日历</h4>
+
+{% if message %}<div class="alert alert-success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+<!-- 月份选择 -->
+<div class="glass-card py-2 px-3 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' person.id %}?y={{ prev_y }}&m={{ prev_m }}">◀ 上月</a>
+            <span class="fw-bold fs-5 px-3">{{ year }} 年 {{ month }} 月
+                <span class="text-muted-light small">（周期 {{ start|date:"m月d日" }} ~ {{ end|date:"m月d日" }}）</span>
+            </span>
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' person.id %}?y={{ next_y }}&m={{ next_m }}">下月 ▶</a>
+        </div>
+        <form method="get" class="d-flex align-items-center gap-2">
+            <input type="number" name="y" class="form-control form-control-sm" value="{{ year }}" min="2020" max="2100" style="width:90px;">
+            <input type="number" name="m" class="form-control form-control-sm" value="{{ month }}" min="1" max="12" style="width:80px;">
+            <button class="btn btn-sm btn-primary" type="submit">跳转</button>
+        </form>
+    </div>
+    <div class="text-muted-light small mt-2">
+        {% if schedule %}
+            {% if schedule.team %}{{ schedule.team.name }} · {% endif %}{{ schedule.status }} · {{ schedule.message }}
+        {% else %}
+            {{ year }} 年 {{ month }} 月还没有为该人员所在班组生成排班，日历显示为空（全部休息）。
+        {% endif %}
+    </div>
+</div>
+
+<!-- 顶部信息 -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">班组</div>
+            <div class="fs-5 fw-bold">{{ person.team.name|default:"未分组" }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">默认班次</div>
+            <div class="fs-5 fw-bold text-primary">{{ person.default_shift }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">已上班数（按日期自动算）</div>
+            <div class="fs-5 fw-bold text-success">{{ worked_auto }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">应上班数 / 还需</div>
+            <div class="fs-5 fw-bold">{{ required }} / {{ remaining }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="glass-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="card-title mb-0">📅 排班周期：{{ start|date:"m月d日" }} ~ {{ end|date:"m月d日" }}（{{ days }} 天）</div>
+        <div>
+            {% if schedule %}
+                <span class="badge {% if schedule.status == 'OPTIMAL' %}badge-ok{% else %}text-bg-warning{% endif %}">{{ schedule.status }}</span>
+            {% else %}
+                <span class="badge text-bg-secondary">尚无排班</span>
+            {% endif %}
+            {% if can_edit %}
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:person_edit' person.id %}">编辑信息</a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="text-muted-light small mb-2">
+        {% if can_edit %}
+        每个格子的下拉都可以修改当天排班：<b>早班 / 中班 / 晚班 / 休息</b>；选择后自动保存。
+        {% else %}队员账号为只读，仅可查看排班。{% endif %}
+        日期旁带 <span class="text-primary">●</span> 的是今天的格子。
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle text-center">
+            <thead>
+                <tr>
+                    <th style="min-width:44px;">日</th>
+                    <th style="min-width:44px;">一</th>
+                    <th style="min-width:44px;">二</th>
+                    <th style="min-width:44px;">三</th>
+                    <th style="min-width:44px;">四</th>
+                    <th style="min-width:44px;">五</th>
+                    <th style="min-width:44px;">六</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for week in weeks %}
+            <tr>
+                {% for cell in week %}
+                    {% if cell %}
+                    <td style="padding:.35rem .2rem;">
+                        <div class="small text-muted-light mb-1 fw-bold">
+                            {{ cell.date|date:"d" }}{% if cell.date == today %}<span class="text-primary"> ●</span>{% endif %}
+                        </div>
+                        {% if cell.shift %}
+                            <div class="badge badge-ok mb-1" style="font-size:.78rem;">下井·{{ cell.shift }}</div>
+                        {% else %}
+                            <div class="text-muted-light" style="font-size:.72rem;">休</div>
+                        {% endif %}
+                        {% if can_edit %}
+                        <form method="post" class="mt-1">
+                            {% csrf_token %}
+                            <input type="hidden" name="day" value="{{ cell.index }}">
+                            <select name="shift" class="form-select form-select-sm" style="font-size:.72rem; padding:.1rem .4rem;" onchange="this.form.submit()">
+                                {% for s in shifts %}
+                                <option value="{{ s }}" {% if cell.shift == s %}selected{% endif %}>{{ s }}</option>
+                                {% endfor %}
+                                <option value="休息" {% if not cell.shift %}selected{% endif %}>休息</option>
+                            </select>
+                        </form>
+                        {% endif %}
+                    </td>
+                    {% else %}
+                    <td class="bg-light" style="opacity:.5"></td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

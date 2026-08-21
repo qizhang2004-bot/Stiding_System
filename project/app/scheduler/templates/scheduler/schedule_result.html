@@ -1,0 +1,162 @@
+{% extends "scheduler/base.html" %}
+{% block title %}{{ record.year }}-{{ record.month|stringformat:"02d" }} 排班结果{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="page-title mb-0">
+        {{ record.team.name|default:"未分组" }} · {{ record.year }} 年 {{ record.month }} 月排班结果
+    </h4>
+    <div>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:team_manage' %}?team={{ record.team.name|default:'' }}">再排一次</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:shift_board' %}?y={{ record.year }}&m={{ record.month }}">班次展示</a>
+        <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:schedule_list' %}">所有记录</a>
+    </div>
+</div>
+
+{% if record.status == 'INFEASIBLE' or not record.result_json %}
+<div class="glass-card">
+    <div class="alert alert-danger mb-0">
+        <b>本次排班无解：</b>{{ record.message }}
+        {% for d in record.diagnostics %}<div>· {{ d }}</div>{% endfor %}
+    </div>
+</div>
+{% else %}
+
+<!-- 统计卡片 -->
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">求解状态</div>
+            <div class="fs-4 fw-bold {% if record.status == 'OPTIMAL' %}text-success{% else %}text-warning{% endif %}">{{ record.status }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">达标人数</div>
+            <div class="fs-4 fw-bold text-success">{{ stats.reached_count }} / {{ stats.reached_total }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">人均班数</div>
+            <div class="fs-4 fw-bold">{{ stats.avg }}</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="glass-card text-center py-3">
+            <div class="text-muted-light small">单休 / 连休超限</div>
+            <div class="fs-4 fw-bold {% if stats.single_rest == 0 and stats.rest_violations == 0 %}text-success{% else %}text-danger{% endif %}">
+                {{ stats.single_rest }} / {{ stats.rest_violations }}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if record.diagnostics %}
+<div class="glass-card py-2 small text-muted-light">{% for d in record.diagnostics %}· {{ d }}<br>{% endfor %}</div>
+{% endif %}
+
+{% if shortfall %}
+<div class="glass-card" style="border:1px solid rgba(220,53,69,.4);">
+    <div class="alert alert-danger mb-0">
+        <b>⚠️ 排班不足警告：有 {{ shortfall|length }} 人未达到应上班数</b>
+        <div class="mt-2">
+            {% if capacity %}
+            按当前配置：每天 {{ capacity.daily }} 人 × {{ record.days }} 天 = {{ capacity.total }} 班；
+            每人最少 {{ capacity.target }} 班，且连休规则限定每人最少 <b>{{ capacity.min_work }}</b> 班
+            → 最多只有 <b>{{ capacity.max_fillable }}</b> 人能排满，本班 {{ capacity.people }} 人
+            {% if capacity.needed_exempt > 0 %}，因此<b class="text-danger">至少需要豁免 {{ capacity.needed_exempt }} 人</b>。{% else %}。{% endif %}
+            {% endif %}
+            <ul class="mb-2 mt-2">
+                {% for s in shortfall %}
+                <li>{{ s.name }}：需 <b>{{ s.target }}</b> 班，本次只排了 <b class="text-danger">{{ s.count }}</b> 班</li>
+                {% endfor %}
+            </ul>
+            <div class="text-muted">建议：① 到 <a href="{% url 'scheduler:team_manage' %}?team={{ record.team.name|default:'' }}">班组管理</a>
+            把这些人员设为<b>豁免</b>（豁免后不再要求达到最少班数）；② 或提高每天应上人数 / 增加人员。</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- 月度班次表 -->
+    <div class="col-lg-8">
+        <div class="glass-card">
+            <div class="card-title">📅 每日上班名单
+                <span class="text-muted-light small">（周期 {{ record.start_date|date:"m月d日" }} ~ 结束，共 {{ record.days }} 天，每天下井 {{ record.daily_total }} 人）</span>
+            </div>
+            <div class="table-responsive" style="max-height:560px; overflow:auto;">
+                <table class="table table-sm table-bordered">
+                    <thead>
+                        <tr>
+                            <th class="text-center">日期</th>
+                            {% for s in shifts %}<th class="text-center">{{ s }}</th>{% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td class="text-center fw-bold">
+                                {{ row.date|date:"m/d" }}{% if row.date|date:"D" == "周六" or row.date|date:"D" == "周日" %} 🎈{% endif %}
+                            </td>
+                            {% for shift, names in row.cells %}
+                            <td>
+                                {% for n in names %}<span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ n }}</span>{% endfor %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 每人班数统计 -->
+    <div class="col-lg-4">
+        <div class="glass-card">
+            <div class="card-title">👤 每人当月班数</div>
+            <div class="table-responsive" style="max-height:560px; overflow:auto;">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>姓名</th>
+                            <th class="text-center">已上</th>
+                            <th class="text-center">应上</th>
+                            <th class="text-center">本次</th>
+                            <th class="text-center">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for name, cnt, st, worked, required in count_rows %}
+                        <tr>
+                            <td>{{ name }}</td>
+                            <td class="text-center text-muted-light">{{ worked }}</td>
+                            <td class="text-center text-muted-light">{{ required }}</td>
+                            <td class="text-center fw-bold">{{ cnt }}</td>
+                            <td class="text-center">
+                                {% if st == "ok" %}
+                                    <span class="badge badge-ok">✓ 达标</span>
+                                {% elif st == "no" %}
+                                    <span class="badge badge-no">✗ 未达标</span>
+                                {% else %}
+                                    <span class="text-muted-light small">豁免</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="text-muted-light small mt-2">
+    配置快照：班组 {{ record.team.name|default:"—" }}；每天下井 {{ record.daily_total|default:record.shift_demand }} 人；
+    岗位条件 {{ record.role_reqs }}；全局最少班数 {{ record.min_shift_target }}；
+    豁免 {{ record.exempt_names|default:"无" }}；连休 {{ record.rest_block }}；每10天最多 {{ record.work_window.max_work }} 班。
+    生成时间：{{ record.created_at|date:"Y-m-d H:i:s" }}
+</div>
+{% endif %}
+{% endblock %}

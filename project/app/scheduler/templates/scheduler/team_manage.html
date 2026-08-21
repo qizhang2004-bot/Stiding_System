@@ -1,0 +1,505 @@
+{% extends "scheduler/base.html" %}
+{% block title %}班组管理 - 排班系统{% endblock %}
+{% block content %}
+<h4 class="page-title">{% if selected_group %}{{ selected_group.name }} · {% endif %}班组管理</h4>
+
+{% if message %}<div class="alert alert-success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger" style="white-space:pre-line">{{ error }}</div>{% endif %}
+
+<!-- 选择队组（超级管理员用；队组账号自动定位自己的队组） -->
+<div class="glass-card">
+    <div class="card-title">🏷️ 选择队组</div>
+    {% if is_super %}
+    <div class="d-flex flex-wrap gap-2">
+        {% for g in groups %}
+        <a class="btn {% if selected_group and g.id == selected_group.id %}btn-primary{% else %}btn-outline-primary{% endif %} px-4"
+           href="{% url 'scheduler:team_manage' %}?group={{ g.id }}">{{ g.name }}</a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <span class="badge text-bg-info border" style="font-size:.95rem; border-radius:10px;">{{ selected_group.name|default:"未绑定队组" }}</span>
+        <span class="text-muted-light small">（您所属的队组）</span>
+    </div>
+    {% endif %}
+</div>
+
+{% if not selected_group %}
+<div class="glass-card text-center py-5 text-muted-light">
+    <div style="font-size:3rem;">👥</div>
+    <div class="mt-2">请先在上方选择一个队组，再查看该队组的班组与排班。</div>
+</div>
+{% else %}
+
+<!-- 班组标签：点击哪个班就显示哪个班 -->
+<div class="glass-card">
+    <div class="card-title">🏷️ 选择班组</div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        {% for t in teams %}
+        <a class="btn {% if t.id == team.id %}btn-primary{% else %}btn-outline-primary{% endif %} px-4"
+           href="{% url 'scheduler:team_manage' %}?group={{ selected_group.id }}&team={{ t.id }}">{{ t.name }}</a>
+        {% empty %}
+        <span class="text-muted-light">该队组下还没有班组。</span>
+        {% endfor %}
+        {% if is_super %}
+        <form method="post" class="d-flex gap-2 ms-2">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="add_team">
+            <input type="text" name="team_name" class="form-control" placeholder="自定义班组名" style="max-width:180px;">
+            <button class="btn btn-sm btn-outline-primary" type="submit">+ 添加</button>
+        </form>
+        {% if team %}
+        <button type="button" class="btn btn-sm btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#delTeamModal">🗑 删除班组</button>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% if team %}
+    <div class="text-muted-light small mt-2">
+        当前选中：<b>{{ team.name }}</b>。
+        {% if can_edit %}先选中要删除的班组，再点「删除班组」。{% else %}队员账号为只读，仅可查看。{% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- 删除班组确认弹窗：必须输入「删除」两个字才能确认 -->
+{% if team and is_super %}
+<div class="modal fade" id="delTeamModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:18px;">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger">⚠️ 删除班组「{{ team.name }}」</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>确定要删除班组 <b>「{{ team.name }}」</b> 吗？</p>
+                <ul class="text-muted-light small">
+                    <li>该班组下的 <b>{{ rows|length }} 名人员</b> 将变为「未分组」；</li>
+                    <li>该班组的排班记录仍在，但会失去班组归属；</li>
+                    <li>该班组存储的排班约束将被删除，<b>无法恢复</b>。</li>
+                </ul>
+                <p class="mb-1 fw-semibold">请在下面输入「删除」两个字以确认：</p>
+                <input type="text" id="delConfirmInput" class="form-control" placeholder="请输入：删除" autocomplete="off">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form method="post" id="delTeamForm">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_team">
+                    <input type="hidden" name="team_id" value="{{ team.id }}">
+                    <input type="hidden" name="confirm_text" id="delConfirmText" value="">
+                    <button type="submit" class="btn btn-danger" id="delTeamBtn" disabled>确认删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{% if team %}
+<!-- 该班的约束（1.1~1.4） -->
+<div class="glass-card">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="card-title mb-0">⚙️ 「{{ team.name }}」的排班约束</div>
+        <span class="text-muted-light small">修改后点「保存约束」，排班会按这里存储的约束来</span>
+    </div>
+    {% if can_edit %}
+    <form method="post" id="constraintForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="save_constraints">
+        <input type="hidden" name="team_id" value="{{ team.id }}">
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">1.1 该班应上人数（每天）</label>
+                <input type="number" name="daily_headcount" class="form-control" min="0" value="{{ team.daily_headcount }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">1.3 连休范围（天）</label>
+                <div class="input-group">
+                    <span class="input-group-text">≥</span>
+                    <input type="number" name="rest_min" class="form-control" min="1" value="{{ team.rest_block.min|default:2 }}">
+                    <span class="input-group-text">≤</span>
+                    <input type="number" name="rest_max" class="form-control" min="1" value="{{ team.rest_block.max|default:default_rest_max }}">
+                </div>
+                <div class="form-text">休息必须连休，天数在 大于等于~小于等于 之间（不允许单休）；最大值默认 ≈（周期天数-最少上班班数）/3</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">1.4 每人应上最少班数</label>
+                <div class="input-group">
+                    <input type="number" name="min_shift_target" class="form-control" min="0" value="{{ team.min_shift_target }}">
+                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#exemptModal">豁免人员</button>
+                </div>
+                <div class="form-text">
+                    已豁免：
+                    {% for e in team.exempt_names %}<span class="badge text-bg-warning border ms-1" style="border-radius:8px;">{{ e }}</span>{% empty %}无{% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold">1.2 固定岗位应上人数 <span class="text-muted-light small">（岗位 | 条件 | 人数，岗位从该班人员的岗位中选择）</span></label>
+            <div id="roleRows">
+                {% for role, spec in team.role_reqs.items %}
+                <div class="input-group mb-2">
+                    <select name="role_names" class="form-select" style="min-width:110px; max-width:160px;">
+                        {% for r in team_role_options %}
+                        <option value="{{ r }}" {% if r == role %}selected{% endif %}>{{ r }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="role_ops" class="form-select" style="max-width:120px;">
+                        <option value=">=" {% if spec.op == ">=" %}selected{% endif %}>至少 ≥</option>
+                        <option value="<=" {% if spec.op == "<=" %}selected{% endif %}>至多 ≤</option>
+                        <option value="==" {% if spec.op == "==" %}selected{% endif %}>等于 =</option>
+                    </select>
+                    <input type="number" name="role_counts" class="form-control" value="{{ spec.count }}" min="0" style="max-width:100px;">
+                    <button type="button" class="btn btn-outline-danger remove-row">×</button>
+                </div>
+                {% empty %}
+                <div class="text-muted-light">还没有岗位条件，可点击下方「+ 添加岗位条件」。</div>
+                {% endfor %}
+            </div>
+            <div class="input-group mb-2 d-none" id="newRoleRow">
+                <select name="role_names" class="form-select" style="min-width:110px; max-width:160px;">
+                    <option value="">选择岗位…</option>
+                    {% for r in team_role_options %}
+                    <option value="{{ r }}">{{ r }}</option>
+                    {% endfor %}
+                </select>
+                <select name="role_ops" class="form-select" style="max-width:120px;">
+                    <option value=">=">至少 ≥</option>
+                    <option value="<=">至多 ≤</option>
+                    <option value="==">等于 =</option>
+                </select>
+                <input type="number" name="role_counts" class="form-control" value="1" min="0" style="max-width:100px;">
+                <button type="button" class="btn btn-outline-danger remove-row">×</button>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addRole">+ 添加岗位条件</button>
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary px-4" type="submit">💾 保存约束</button>
+            <button class="btn btn-success px-4" type="submit" formaction="{% url 'scheduler:team_manage' %}?group={{ selected_group.id|default:'' }}&action=generate&team={{ team.id }}" formmethod="get">⚙️ 生成「{{ team.name }}」排班</button>
+        </div>
+
+        <!-- 实时约束自检（随 每天人数/最少班数/岗位条件 实时变化） -->
+        <div class="mt-3 p-3 rounded" id="liveCheck" style="background:rgba(255,255,255,.65); border:1px dashed rgba(106,156,245,.4);">
+            <div class="fw-bold small mb-1">🔎 约束实时自检</div>
+            <div class="small text-muted-light mb-2">修改「每天应上人数 / 最少班数 / 岗位条件」后会即时重算，标红的岗位表示按当前条件排不满应上班数。</div>
+            <div id="liveCapacity" class="small mb-2"></div>
+            <div id="liveRoles" class="small"></div>
+        </div>
+
+        {% if capacity %}
+        <div class="mt-3 p-3 rounded {% if capacity.needed_exempt > 0 %}" style="background:rgba(255,193,7,.15); border:1px solid rgba(255,193,7,.4);{% else %}" style="background:rgba(255,255,255,.55);{% endif %}">
+            <div class="small">
+                <b>容量预估</b>（按当前约束）：
+                每天 {{ capacity.daily }} 人 × {{ period_days }} 天 = <b>{{ capacity.total }}</b> 班；
+                每人最少 {{ capacity.target }} 班、连休规则使每人最少 <b>{{ capacity.min_work }}</b> 班、最多 <b>{{ capacity.max_work }}</b> 班
+                → 最多 <b>{{ capacity.max_fillable }}</b> 人能排满 {{ capacity.target }} 班。
+                {% if capacity.needed_exempt > 0 %}
+                <span class="text-danger fw-semibold">本班 {{ capacity.people }} 人，还需要豁免 <b>{{ capacity.needed_exempt }}</b> 人，否则会有人排不满（排满后结果页会列出名单）。</span>
+                {% else %}
+                <span class="text-success">本班 {{ capacity.people }} 人，刚好够 / 有富余。</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </form>
+    {% else %}
+    <!-- 队员只读：约束以文字展示 -->
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="text-muted-light small">1.1 该班应上人数（每天）</div>
+            <div class="fs-5 fw-bold">{{ team.daily_headcount }} 人</div>
+        </div>
+        <div class="col-md-4">
+            <div class="text-muted-light small">1.3 连休范围（天）</div>
+            <div class="fs-5 fw-bold">≥ {{ team.rest_block.min|default:2 }} ~ ≤ {{ team.rest_block.max|default:4 }}</div>
+        </div>
+        <div class="col-md-4">
+            <div class="text-muted-light small">1.4 每人应上最少班数</div>
+            <div class="fs-5 fw-bold">{{ team.min_shift_target }} 班
+                {% if team.exempt_names %}<span class="small text-muted-light">（豁免：{{ team.exempt_names|join:"、" }}）</span>{% endif %}
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="text-muted-light small">1.2 固定岗位应上人数</div>
+            <div>
+                {% if team.role_reqs %}
+                    {% for role, spec in team.role_reqs.items %}
+                    <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ role }} {{ spec.op }} {{ spec.count }}</span>
+                    {% endfor %}
+                {% else %}
+                    <span class="text-muted-light">未设置</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- 导入人员 -->
+{% if can_edit %}
+<div class="glass-card">
+    <div class="card-title">📥 导入人员（可导入到任意班组）</div>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="import">
+        <textarea name="import_text" class="form-control mb-2" rows="5" style="font-family:ui-monospace,Menlo,monospace;"
+                  placeholder="检修班-王磊磊-班长-0-18-早班&#10;检修班-秦湖平-班长,皮带-0-18&#10;运输班-杨志磊-电工-0-18-晚班"></textarea>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <input type="file" name="import_file" class="form-control" accept=".txt,.csv" style="max-width:260px;">
+            <button class="btn btn-primary px-3" type="submit">导入人员</button>
+            <span class="text-muted-light small">格式：班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次（默认班次可写 早班/中班/晚班，不写默认早班）</span>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+<!-- 1.5 该班的人 -->
+<div class="glass-card">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+        <div class="card-title mb-0">👥 「{{ team.name }}」的人员</div>
+        <span class="text-muted-light small" id="peopleCount">{{ rows|length }} 人</span>
+    </div>
+    {% if rows %}
+    <!-- 按岗位筛选（可多选） -->
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3 p-2 rounded" style="background:rgba(255,255,255,.55);">
+        <span class="text-muted-light small fw-semibold">按岗位筛选：</span>
+        <label class="role-chip">
+            <input type="checkbox" class="btn-check role-filter" id="filterAll" checked>
+            <span class="btn btn-sm btn-outline-primary">所有</span>
+        </label>
+        {% for r in team_role_options %}
+        <label class="role-chip">
+            <input type="checkbox" class="btn-check role-filter" data-role="{{ r }}" id="filter_{{ forloop.counter }}">
+            <span class="btn btn-sm btn-outline-secondary">{{ r }}</span>
+        </label>
+        {% endfor %}
+        <span class="text-muted-light small ms-2">可多选，选完即显示对应岗位的人</span>
+    </div>
+    <div class="table-responsive" style="max-height:50vh; overflow:auto;">
+        <table class="table align-middle" id="teamPeople">
+            <thead>
+                <tr>
+                    <th>姓名</th><th>岗位</th><th class="text-center">默认班次</th>
+                    <th class="text-center">已上班数</th><th class="text-center">应上班数</th>
+                    <th class="text-center">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p, worked in rows %}
+                <tr data-roles="{% for r in p.roles.all %}{{ r.name }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                    <td class="fw-bold">{{ p.name }}</td>
+                    <td>
+                        {% for r in p.roles.all %}
+                            <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ r.name }}</span>
+                        {% empty %}<span class="text-muted-light">未设置</span>{% endfor %}
+                    </td>
+                    <td class="text-center">{{ p.default_shift }}</td>
+                    <td class="text-center fw-bold">{{ worked }}</td>
+                    <td class="text-center fw-semibold">{{ p.required_shifts }}</td>
+                    <td class="text-center">
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' p.id %}">日历</a>
+                        {% if can_edit %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:person_edit' p.id %}">编辑</a>
+                        <form method="post" class="d-inline" onsubmit="return confirm('确定删除 {{ p.name }} 吗？');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="person_id" value="{{ p.id }}">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">删除</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center text-muted-light py-4">该班组还没有人员，请在上方导入。</div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- 豁免人员弹窗 -->
+{% if team and can_edit %}
+<div class="modal fade" id="exemptModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content" style="border-radius:18px;">
+            <div class="modal-header">
+                <h5 class="modal-title">豁免人员 —— 「{{ team.name }}」</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted-light">勾选的人员不需要达到「每人应上最少班数」。</p>
+                <div class="row">
+                    {% for p in team_persons %}
+                    <div class="col-sm-4 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="exempt" value="{{ p.name }}"
+                                   form="constraintForm"
+                                   id="exempt_{{ forloop.counter }}"
+                                   {% if p.name in team.exempt_names %}checked{% endif %}>
+                            <label class="form-check-label" for="exempt_{{ forloop.counter }}">{{ p.name }}</label>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <div class="text-muted-light">该班组暂无人员。</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="submit" class="btn btn-primary" form="constraintForm">保存约束并关闭</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{{ role_holder_counts|json_script:"holdersData" }}
+<script>
+// ---- 按岗位筛选（可多选） ----
+const filterAll = document.getElementById('filterAll');
+const roleFilters = [...document.querySelectorAll('.role-filter[data-role]')];
+function applyRoleFilter() {
+    const selected = roleFilters.filter(c => c.checked).map(c => c.dataset.role);
+    const showAll = filterAll.checked || selected.length === 0;
+    let shown = 0;
+    document.querySelectorAll('#teamPeople tbody tr').forEach(tr => {
+        const roles = (tr.dataset.roles || '').split(',');
+        const match = showAll || selected.some(r => roles.includes(r));
+        tr.style.display = match ? '' : 'none';
+        if (match) shown++;
+    });
+    const cnt = document.getElementById('peopleCount');
+    if (cnt) cnt.textContent = shown + ' 人' + (showAll || selected.length === 0 ? '' : '（已按岗位筛选）');
+}
+filterAll?.addEventListener('change', function () {
+    if (this.checked) roleFilters.forEach(c => { c.checked = false; });
+    applyRoleFilter();
+});
+roleFilters.forEach(c => c.addEventListener('change', function () {
+    if (this.checked) filterAll.checked = false;
+    applyRoleFilter();
+}));
+
+// 删除班组确认：必须输入「删除」两个字才能点确认
+const delInput = document.getElementById('delConfirmInput');
+const delBtn = document.getElementById('delTeamBtn');
+const delText = document.getElementById('delConfirmText');
+if (delInput) {
+    delInput.addEventListener('input', function () {
+        const ok = this.value.trim() === '删除';
+        delBtn.disabled = !ok;
+        delText.value = this.value.trim();
+    });
+    document.getElementById('delTeamModal').addEventListener('show.bs.modal', function () {
+        delInput.value = '';
+        delText.value = '';
+        delBtn.disabled = true;
+    });
+}
+document.querySelectorAll('.remove-row').forEach(btn => {
+    btn.addEventListener('click', function () { this.closest('.input-group').remove(); });
+});
+document.getElementById('addRole').addEventListener('click', function () {
+    const proto = document.getElementById('newRoleRow');
+    const row = proto.cloneNode(true);
+    row.classList.remove('d-none');
+    row.id = '';
+    const roleSel = row.querySelector('select[name="role_names"]');
+    if (roleSel) roleSel.value = '';
+    proto.parentNode.insertBefore(row, proto);
+    row.querySelector('.remove-row').addEventListener('click', function () { row.remove(); });
+});
+// 生成按钮：先把约束保存（POST），再跳转生成
+document.querySelector('#constraintForm button[formaction]')?.addEventListener('click', function (e) {
+    e.preventDefault();
+    const form = document.getElementById('constraintForm');
+    // 先保存约束（POST 到当前页面地址）
+    const fd = new FormData(form);
+    fd.set('action', 'save_constraints');
+    const url = window.location.pathname + window.location.search;
+    fetch(url, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(() => { window.location.href = this.getAttribute('formaction'); });
+});
+
+// ---- 约束实时自检 ----
+const DAYS = {{ period_days }};
+const HOLDERS = JSON.parse(document.getElementById('holdersData').textContent);
+const TOTAL_PEOPLE = {{ team_persons|length }};
+function minWorkDays(days, rmax) {
+    for (let w = 0; w <= days; w++) {
+        const rest = days - w;
+        const minParts = Math.ceil(rest / rmax);
+        const maxParts = w + 1;
+        if (minParts > maxParts) continue;
+        for (let k = minParts; k <= maxParts; k++) {
+            if (2 * k <= rest && rest <= rmax * k) return w;
+        }
+    }
+    return days;
+}
+function liveCheck() {
+    const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
+    const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
+    const restMax = parseInt(document.querySelector('input[name="rest_max"]')?.value) || 4;
+    const elCap = document.getElementById('liveCapacity');
+    const elRoles = document.getElementById('liveRoles');
+    if (!elCap || !elRoles) return;
+
+    // 总容量
+    if (daily > 0 && target > 0) {
+        const total = daily * DAYS;
+        const mw = minWorkDays(DAYS, restMax);
+        const maxFill = Math.max(0, Math.min(TOTAL_PEOPLE, Math.floor((total - TOTAL_PEOPLE * mw) / (target - mw))));
+        const need = Math.max(0, TOTAL_PEOPLE - maxFill);
+        elCap.innerHTML = '总班次：每天 ' + daily + ' 人 × ' + DAYS + ' 天 = <b>' + total + '</b> 班；' +
+            '连休规则限每人最少 <b>' + mw + '</b> 班 → 最多 <b>' + maxFill + '</b> 人能满 ' + target + ' 班' +
+            (need > 0 ? '；<span class="text-danger fw-semibold">需豁免 ' + need + ' 人</span>' : '；<span class="text-success">全员可满</span>') + '。';
+    } else {
+        elCap.innerHTML = '请填写「每天应上人数」和「每人应上最少班数」。';
+    }
+
+    // 每个岗位
+    let html = '';
+    document.querySelectorAll('#roleRows .input-group').forEach(row => {
+        const role = row.querySelector('select[name="role_names"]')?.value;
+        const op = row.querySelector('select[name="role_ops"]')?.value;
+        const cnt = parseInt(row.querySelector('input[name="role_counts"]')?.value) || 0;
+        if (!role || cnt <= 0) return;
+        const holders = HOLDERS[role] || 0;
+        const roleTotal = cnt * DAYS;
+        const avg = holders > 0 ? Math.floor(roleTotal / holders) : 0;
+        const opLabel = op === '>=' ? '至少' : op === '<=' ? '至多' : '等于';
+        let warn = '';
+        if (holders === 0) {
+            warn = ' <span class="text-danger fw-semibold">⚠ 该岗位没有人员</span>';
+        } else if (op === '==') {
+            if (target > 0 && avg < target) {
+                warn = ' <span class="text-danger fw-semibold">⚠ 每天恰好 ' + cnt + ' 人，' + holders + ' 人平均最多约 ' + avg +
+                       ' 班，达不到 ' + target + ' 班——建议改「至少」或豁免该岗位人员</span>';
+            } else {
+                warn = ' <span class="text-success">（每天恰好 ' + cnt + ' 人，人均 ' + avg + ' 班，可满足）</span>';
+            }
+        }
+        html += '<div class="mb-1">· <b>' + role + '</b>：每天 ' + opLabel + ' ' + cnt + ' 人 × ' + DAYS + ' 天 = ' +
+                roleTotal + ' 个班，该岗位 ' + holders + ' 人' +
+                (op === '==' ? ' → 平均每人最多 ' + avg + ' 班' : '') + warn + '</div>';
+    });
+    elRoles.innerHTML = html || '<div class="text-muted-light">暂无岗位条件。</div>';
+}
+// 绑定实时监听
+['daily_headcount', 'min_shift_target', 'rest_max'].forEach(n => {
+    document.querySelector('input[name="' + n + '"]')?.addEventListener('input', liveCheck);
+});
+document.getElementById('roleRows')?.addEventListener('change', liveCheck);
+document.getElementById('roleRows')?.addEventListener('input', liveCheck);
+liveCheck();
+</script>
+{% endblock %}

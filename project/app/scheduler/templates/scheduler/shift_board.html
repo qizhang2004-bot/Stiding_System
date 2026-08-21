@@ -1,0 +1,97 @@
+{% extends "scheduler/base.html" %}
+{% block title %}班次展示 - 排班系统{% endblock %}
+{% block content %}
+<h4 class="page-title">{% if selected_group %}{{ selected_group.name }} · {% endif %}班次展示</h4>
+
+<!-- 选择队组（超级管理员用；队组账号自动定位自己的队组） -->
+<div class="glass-card mb-3">
+    <div class="card-title mb-2">🏷️ 选择队组</div>
+    {% if not user_group %}
+    <div class="d-flex flex-wrap gap-2">
+        {% for g in groups %}
+        <a class="btn {% if selected_group and g.id == selected_group.id %}btn-primary{% else %}btn-outline-primary{% endif %} px-4"
+           href="{% url 'scheduler:shift_board' %}?group={{ g.id }}">{{ g.name }}</a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <span class="badge text-bg-info border" style="font-size:.95rem; border-radius:10px;">{{ selected_group.name|default:"未绑定队组" }}</span>
+    {% endif %}
+</div>
+
+{% if not selected_group %}
+<div class="glass-card text-center py-5 text-muted-light">
+    <div style="font-size:3rem;">🗓️</div>
+    <div class="mt-2">请先在上方选择一个队组，再查看该队组的班次。</div>
+</div>
+{% else %}
+
+<!-- 月份选择 -->
+<div class="glass-card py-2 px-3 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:shift_board' %}?group={{ selected_group.id }}&y={{ prev_y }}&m={{ prev_m }}">◀ 上月</a>
+            <span class="fw-bold fs-5 px-3">{{ year }} 年 {{ month }} 月
+                <span class="text-muted-light small">（周期 {{ start|date:"m月d日" }} ~ {{ end|date:"m月d日" }}，已有 {{ schedule_count }} 个班组排班）</span>
+            </span>
+            <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:shift_board' %}?group={{ selected_group.id }}&y={{ next_y }}&m={{ next_m }}">下月 ▶</a>
+        </div>
+        <form method="get" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="group" value="{{ selected_group.id }}">
+            <input type="number" name="y" class="form-control form-control-sm" value="{{ year }}" min="2020" max="2100" style="width:90px;">
+            <input type="number" name="m" class="form-control form-control-sm" value="{{ month }}" min="1" max="12" style="width:80px;">
+            <button class="btn btn-sm btn-primary" type="submit">跳转</button>
+        </form>
+    </div>
+</div>
+
+{% if schedule_count == 0 %}
+<div class="glass-card text-center py-5 text-muted-light">
+    <div style="font-size:3rem;">🗓️</div>
+    <div class="mt-2">{{ year }} 年 {{ month }} 月还没有任何班组的排班，请先到「班组管理」生成。</div>
+</div>
+{% else %}
+<div class="glass-card">
+    <div class="card-title">📅 每天每个班次上班人数
+        <span class="text-muted-light small">（点班次框查看该班次各班组的人员明细）</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle" style="table-layout:fixed;">
+            <thead class="text-center">
+                <tr>
+                    <th style="width:56px;">日</th><th>一</th><th>二</th><th>三</th><th>四</th><th>五</th><th>六</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for week in weeks %}
+            <tr>
+                {% for cell in week %}
+                    {% if cell %}
+                    <td class="align-top" style="padding:.3rem;">
+                        <div class="text-center small fw-bold mb-1">
+                            {{ cell.date|date:"d" }}{% if cell.date == today %}<span class="text-primary"> ●</span>{% endif %}
+                        </div>
+                        {% for info in cell.shifts %}
+                            <a class="d-block text-decoration-none mb-1"
+                               href="{% url 'scheduler:shift_detail' year month cell.index info.name %}?group={{ selected_group.id }}">
+                                <div class="badge w-100" style="background:linear-gradient(90deg,#6a9cf5,#8fb8ff); border-radius:8px; font-size:.8rem;">
+                                    {{ info.name }}：<b>{{ info.total }}</b>人
+                                </div>
+                                <div class="small text-muted-light" style="font-size:.68rem;">
+                                    {% for tname, cnt in info.teams %}{{ tname }} {{ cnt }}人{% if not forloop.last %} · {% endif %}{% endfor %}
+                                </div>
+                            </a>
+                        {% endfor %}
+                    </td>
+                    {% else %}
+                    <td class="bg-light" style="opacity:.5"></td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

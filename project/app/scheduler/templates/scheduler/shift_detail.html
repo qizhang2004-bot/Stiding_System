@@ -1,0 +1,59 @@
+{% extends "scheduler/base.html" %}
+{% block title %}{{ date|date:"m月d日" }} {{ shift }} 明细 - 排班系统{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="page-title mb-0">{{ date|date:"Y年m月d日" }} · {{ shift }} 班次明细</h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:shift_board' %}?group={{ selected_group.id|default:'' }}&y={{ year }}&m={{ month }}">← 返回班次展示</a>
+</div>
+
+{% if groups %}
+{% for g in groups %}
+<div class="glass-card">
+    <div class="card-title">🏷️ {{ g.team }}（{{ g.entries|length }} 人）</div>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>姓名</th><th>岗位</th>
+                    <th class="text-center">已上班数</th><th class="text-center">应上班数</th>
+                    <th class="text-center">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for e in g.entries %}
+                <tr>
+                    {% if e.person %}
+                    <td class="fw-bold">
+                        <a href="{% url 'scheduler:person_detail' e.person.id %}?y={{ year }}&m={{ month }}" class="text-decoration-none">{{ e.person.name }}</a>
+                    </td>
+                    <td>
+                        {% for r in e.roles %}
+                            <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ r }}</span>
+                        {% empty %}<span class="text-muted-light">—</span>{% endfor %}
+                    </td>
+                    <td class="text-center fw-bold">{{ e.worked }}</td>
+                    <td class="text-center fw-semibold">{{ e.required }}</td>
+                    <td class="text-center">
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' e.person.id %}?y={{ year }}&m={{ month }}">改班</a>
+                    </td>
+                    {% else %}
+                    <td class="fw-bold text-muted-light">{{ e.person_name|default:"" }}</td>
+                    <td colspan="4" class="text-muted-light small">（人员已删除）</td>
+                    {% endif %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+<div class="text-muted-light small">
+    点击姓名或「改班」跳转到个人日历，可修改该人员的排班，修改会同步到班次展示与结果页。
+</div>
+{% else %}
+<div class="glass-card text-center py-5 text-muted-light">
+    <div style="font-size:3rem;">🕳️</div>
+    <div class="mt-2">这一天「{{ shift }}」没有安排人员下井。</div>
+</div>
+{% endif %}
+{% endblock %}

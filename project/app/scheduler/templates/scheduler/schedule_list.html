@@ -1,0 +1,54 @@
+{% extends "scheduler/base.html" %}
+{% block title %}排班记录 - 排班系统{% endblock %}
+{% block content %}
+<h4 class="page-title">排班记录（{{ records|length }}）</h4>
+<div class="glass-card">
+    {% if records %}
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>班组</th><th>月份</th><th>每天下井</th><th>岗位条件</th>
+                    <th>全局最少班数</th><th>豁免</th><th>状态</th><th>生成时间</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for r in records %}
+                <tr>
+                    <td>
+                        {% if r.team %}<span class="badge text-bg-info border" style="border-radius:8px;">{{ r.team.name }}</span>
+                        {% else %}<span class="text-muted-light">—</span>{% endif %}
+                    </td>
+                    <td class="fw-bold">{{ r.year }}-{{ r.month|stringformat:"02d" }}</td>
+                    <td class="text-center">{{ r.daily_total|default:"—" }}</td>
+                    <td class="small">
+                        {% for role, spec in r.role_reqs.items %}
+                            <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ role }} {{ spec.op }} {{ spec.count }}</span>
+                        {% endfor %}
+                    </td>
+                    <td class="text-center">{{ r.min_shift_target }}</td>
+                    <td class="small">{{ r.exempt_names|default:"—" }}</td>
+                    <td>
+                        {% if r.status == "OPTIMAL" %}
+                            <span class="badge badge-ok">最优</span>
+                        {% elif r.status == "FEASIBLE" %}
+                            <span class="badge text-bg-warning">可行</span>
+                        {% else %}
+                            <span class="badge badge-no">无解</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted-light small">{{ r.created_at|date:"Y-m-d H:i" }}</td>
+                    <td><a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:schedule_result' r.id %}">查看</a></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center text-muted-light py-5">
+        <div style="font-size:3rem;">🗂️</div>
+        <div class="mt-2">还没有排班记录，去「排班配置」生成第一份吧。</div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
