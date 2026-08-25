@@ -96,7 +96,12 @@ class Person(models.Model):
 
 
 class Schedule(models.Model):
-    """一次排班的配置快照 + 求解结果（结果以 JSON 保存，便于渲染与导出）。"""
+    """一次排班的配置快照 + 求解状态。
+
+    排班明细（谁哪天哪个班）统一存在 Assignment 表里，本表不再保存结果 JSON，
+    避免「结果 JSON」与「Assignment 明细」两份数据重复、改班时还要两边同步。
+    这里只保留配置快照、求解状态、诊断信息，以及两个求解质量指标。
+    """
     team = models.ForeignKey(
         Team, null=True, blank=True, on_delete=models.SET_NULL,
         related_name="schedules", verbose_name="班组"
@@ -129,7 +134,9 @@ class Schedule(models.Model):
     status = models.CharField("求解状态", max_length=20, default="")
     message = models.CharField("结果说明", max_length=255, default="")
     diagnostics = models.JSONField("诊断信息", default=list)
-    result_json = models.JSONField("排班结果", default=dict)
+    # 求解质量指标（排班明细在 Assignment 表，这两个指标单独存字段）
+    single_rest = models.IntegerField("单休次数", default=0)
+    rest_run_violations = models.IntegerField("连休超限次数", default=0)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
 
     class Meta:

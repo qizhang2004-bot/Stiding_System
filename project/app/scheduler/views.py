@@ -107,19 +107,54 @@ def month_shift(year: int, month: int, delta: int):
     return y, m % 12 + 1
 
 
+def _assignment_matrix(schedule: Schedule):
+    """从 Assignment 表一次查询聚合出排班明细矩阵（唯一数据源）。
+
+    返回 (per_day, worker_counts, by_person)：
+        per_day[day][shift] = [names]     day 为 int、shift 为 str
+        worker_counts[name] = 上班天数     （只含有班的人）
+        by_person[name][day] = shift      个人日历快速查询
+    """
+    shifts = schedule.shifts or FIXED_SHIFTS
+    per_day = {d: {s: [] for s in shifts} for d in range(schedule.days)}
+    worker_counts = {}
+    by_person = {}
+    for a in Assignment.objects.filter(schedule=schedule).select_related("person"):
+        name = a.person.name
+        per_day.setdefault(a.day, {}).setdefault(a.shift, []).append(name)
+        worker_counts[name] = worker_counts.get(name, 0) + 1
+        by_person.setdefault(name, {})[a.day] = a.shift
+    return per_day, worker_counts, by_person
+
+
+def _worked_auto_map(persons, schedule: Schedule = None) -> dict:
+    """批量计算「已上班数」= 导入初始值 + 排班中日期已过的上班天数。
+
+    一次查询该排班的所有明细，避免对每个人各查一次（N+1 查询）。
+    返回 {person_id: 已上班数}。
+    """
+    result = {p.id: p.worked_so_far for p in persons}
+    if not schedule or not schedule.start_date:
+        return result
+    today = date.today()
+    days_by_person = {}
+    for pid, day in Assignment.objects.filter(
+        schedule=schedule, person__in=list(persons)
+    ).values_list("person_id", "day"):
+        days_by_person.setdefault(pid, []).append(day)
+    for pid, days in days_by_person.items():
+        result[pid] += sum(1 for d in days if schedule.start_date + timedelta(days=d) <= today)
+    return result
+
+
 def person_worked_auto(person: Person, schedule: Schedule = None) -> int:
     """已上班数（按日期自动计算）= 导入初始值 + 排班中「日期已过」的上班天数。"""
     count = person.worked_so_far
-    if schedule and schedule.result_json and schedule.start_date:
-        per_day = schedule.result_json.get("per_day", {})
+    if schedule and schedule.start_date:
         today = date.today()
-        for d in range(schedule.days):
-            if schedule.start_date + timedelta(days=d) > today:
-                continue
-            for s in schedule.shifts:
-                if person.name in per_day.get(str(d), {}).get(s, []):
-                    count += 1
-                    break
+        days = Assignment.objects.filter(
+            schedule=schedule, person=person).values_list("day", flat=True)
+        count += sum(1 for d in days if schedule.start_date + timedelta(days=d) <= today)
     return count
 
 
@@ -360,12 +395,16 @@ def team_manage(request):
         if default_team else Person.objects.none()
     schedule_map = {s.team_id: s for s in Schedule.objects.filter(team=default_team).order_by("-created_at")} \
         if default_team else {}
-    rows = [(p, person_worked_auto(p, schedule_map.get(p.team_id))) for p in persons]
+    # 批量计算已上班数（一次查询所有明细，避免 N+1）
+    latest_schedule = schedule_map.get(default_team.id) if default_team else None
+    persons_list = list(persons)
+    worked_map = _worked_auto_map(persons_list, latest_schedule) if latest_schedule else {}
+    rows = [(p, worked_map.get(p.id, p.worked_so_far)) for p in persons_list]
 
     # 固定岗位下拉选项：该班所有人的岗位 去重后的唯一集合（元组），并合并已配置的岗位
     if default_team:
         person_roles = set()
-        for p in persons:
+        for p in persons_list:
             person_roles.update(p.roles.values_list("name", flat=True))
         person_roles.update((default_team.role_reqs or {}).keys())
         team_role_options = tuple(sorted(person_roles))
@@ -393,7 +432,7 @@ def team_manage(request):
     # 每个岗位的持有人数（用于实时"岗位条件可行性"检查；只统计启用人员）
     role_holder_counts = {}
     if default_team:
-        for p in persons:
+        for p in persons_list:
             if not p.is_active:
                 continue
             for rn in p.roles.values_list("name", flat=True):
@@ -496,12 +535,7 @@ def _run_generate(request, team: Team):
         ]
 
     if not result.feasible:
-        # 整体无解：返回结果页显示诊断
-        per_day = {str(d): {s: [] for s in FIXED_SHIFTS} for d in range(days)}
-        result_json = {
-            "per_day": per_day, "worker_counts": {}, "reached": {}, "target": target_global,
-            "single_rest": 0, "rest_run_violations": 0, "days": days, "shortfall": [],
-        }
+        # 整体无解：创建记录保存诊断信息（无排班明细）
         record = Schedule.objects.create(
             team=team, year=y, month=m, start_date=start, days=days,
             shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
@@ -510,36 +544,9 @@ def _run_generate(request, team: Team):
             rest_block=dict(team.rest_block or {"min": 2, "max": 4}),
             work_window=dict(DEFAULT_WORK_WINDOW), worker_snapshot=worker_snapshot,
             status=result.status, message=result.message, diagnostics=result.diagnostics,
-            result_json=result_json,
         )
         return redirect("scheduler:schedule_result", pk=record.id)
 
-    per_day = {str(d): {s: result.per_day[d][s] for s in FIXED_SHIFTS} for d in range(days)}
-    # 排班不足（未达到应上班数）的人员名单，用于结果页警告并提醒设置豁免
-    shortfall = []
-    for p in persons:
-        if p.name in exempt_set:
-            continue
-        if p.required_shifts > 0:
-            tgt = p.required_shifts - p.worked_so_far
-        else:
-            tgt = team.min_shift_target or 0
-        if tgt <= 0:
-            continue
-        cnt = result.worker_counts.get(p.name, 0)
-        if cnt < tgt:
-            shortfall.append({"name": p.name, "target": tgt, "count": cnt})
-    shortfall.sort(key=lambda x: x["target"] - x["count"], reverse=True)
-    result_json = {
-        "per_day": per_day,
-        "worker_counts": result.worker_counts,
-        "reached": result.reached,
-        "target": result.target,
-        "single_rest": result.single_rest,
-        "rest_run_violations": result.rest_run_violations,
-        "days": days,
-        "shortfall": shortfall,
-    }
     record = Schedule.objects.create(
         team=team, year=y, month=m, start_date=start, days=days,
         shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
@@ -552,7 +559,8 @@ def _run_generate(request, team: Team):
         status=result.status,
         message=result.message,
         diagnostics=result.diagnostics,
-        result_json=result_json,
+        single_rest=result.single_rest,
+        rest_run_violations=result.rest_run_violations,
     )
     # 每个班组每个月只保留一份排班：删除该班组同月份更旧的排班（含其明细），
     # 保证班次展示、个人日历、排班记录三者数据一致
@@ -560,12 +568,13 @@ def _run_generate(request, team: Team):
     if old_schedules.exists():
         Assignment.objects.filter(schedule__in=old_schedules).delete()
         old_schedules.delete()
-    Assignment.objects.filter(schedule=record).delete()
+    # 明细统一写入 Assignment 表（唯一数据源）
+    name_map = {p.name: p for p in persons}
     assign_rows = []
     for d in range(days):
         for s in FIXED_SHIFTS:
-            for nm in per_day[str(d)][s]:
-                p = Person.objects.filter(name=nm).first()
+            for nm in result.per_day[d][s]:
+                p = name_map.get(nm)
                 if p:
                     assign_rows.append(Assignment(schedule=record, person=p, day=d, shift=s))
     Assignment.objects.bulk_create(assign_rows)
@@ -654,56 +663,23 @@ def person_detail(request, person_id):
                 error = "无效的改班请求。"
             else:
                 ddate = schedule.start_date + timedelta(days=day) if schedule.start_date else None
-                rj = schedule.result_json
-                per_day = rj.get("per_day", {})
-                cell = per_day.setdefault(str(day), {})
-                was_working = any(person.name in cell.get(s, []) for s in FIXED_SHIFTS)
-
+                # 明细只存 Assignment 表：改班 = 增删改 Assignment，无需再同步结果 JSON
                 if new_shift == "休息":
                     Assignment.objects.filter(schedule=schedule, person=person, day=day).delete()
-                    for s in FIXED_SHIFTS:
-                        if person.name in cell.get(s, []):
-                            cell[s].remove(person.name)
                     message = f"已将{ddate:%m月%d日}改为休息。"
                 elif new_shift in FIXED_SHIFTS:
                     assignment, _ = Assignment.objects.get_or_create(
                         schedule=schedule, person=person, day=day, defaults={"shift": new_shift})
-                    old_shift = assignment.shift
                     assignment.shift = new_shift
                     assignment.save()
-                    if old_shift and person.name in cell.get(old_shift, []):
-                        cell[old_shift].remove(person.name)
-                    cell.setdefault(new_shift, [])
-                    if person.name not in cell[new_shift]:
-                        cell[new_shift].append(person.name)
                     message = f"已将{ddate:%m月%d日}的班次改为「{new_shift}」。"
                 else:
                     error = "无效的改班请求。"
-
-                if not error:
-                    rj["per_day"] = per_day
-                    # 同步每人班数统计与达标标记（保证结果页/统计与日历一致）
-                    is_working = any(person.name in cell.get(s, []) for s in FIXED_SHIFTS)
-                    delta = (1 if is_working else 0) - (1 if was_working else 0)
-                    wc = rj.setdefault("worker_counts", {})
-                    wc[person.name] = max(0, wc.get(person.name, 0) + delta)
-                    tgt = rj.get("target")
-                    reached = rj.setdefault("reached", {})
-                    if person.name in reached and tgt:
-                        reached[person.name] = wc[person.name] >= tgt
-                    schedule.result_json = rj
-                    schedule.save()
 
     start, end, days = period_range(y, m)
     assignments = {}
     if schedule:
         assignments = {a.day: a.shift for a in Assignment.objects.filter(schedule=schedule, person=person)}
-        if not assignments and schedule.result_json:
-            per_day = schedule.result_json.get("per_day", {})
-            for d in range(days):
-                for s in schedule.shifts:
-                    if person.name in per_day.get(str(d), {}).get(s, []):
-                        assignments[d] = s
 
     worked_auto = person_worked_auto(person, schedule)
     remaining = max(0, person.required_shifts - worked_auto)
@@ -775,11 +751,11 @@ def shift_board(request):
     # board[day][shift][team_name] = [names]
     board = {d: {s: {} for s in FIXED_SHIFTS} for d in range(days)}
     for sch in schedules:
-        per_day = (sch.result_json or {}).get("per_day", {})
+        per_day, _, _ = _assignment_matrix(sch)
         team_name = sch.team.name if sch.team else "未分组"
         for d in range(min(days, sch.days)):
             for s in FIXED_SHIFTS:
-                names = per_day.get(str(d), {}).get(s, [])
+                names = per_day.get(d, {}).get(s, [])
                 if names:
                     board[d][s][team_name] = names
 
@@ -836,8 +812,8 @@ def shift_detail(request, year, month, day, shift):
     snap_by_team = {}
     names_today = []
     for sch in schedules:
-        per_day = (sch.result_json or {}).get("per_day", {})
-        names = per_day.get(str(day), {}).get(shift, [])
+        per_day, _, _ = _assignment_matrix(sch)
+        names = per_day.get(day, {}).get(shift, [])
         if names:
             snap_by_team[sch.team.name if sch.team else "未分组"] = names
             names_today.extend(names)
@@ -881,15 +857,36 @@ def schedule_result(request, pk):
     ug = user_group(request)
     if ug and (record.team is None or record.team.group_id != ug.id):
         return redirect("scheduler:index")
-    rj = record.result_json or {}
-    per_day = rj.get("per_day", {})
-    worker_counts = rj.get("worker_counts", {})
-    reached = rj.get("reached", {})
+
     shifts = record.shifts or FIXED_SHIFTS
+    # 明细统一从 Assignment 表聚合（唯一数据源）
+    per_day, wc, _ = _assignment_matrix(record)
+    snap = {s["name"]: s for s in (record.worker_snapshot or [])}
+    # worker_counts 包含所有人（无班的人计 0）
+    worker_counts = {nm: 0 for nm in snap}
+    worker_counts.update(wc)
+
+    # 实时重算达标 / 未达标（目标 = required - worked，或全局最少班数）
+    exempt = set(record.exempt_names or [])
+    target_global = record.min_shift_target or 0
+    reached = {}
+    shortfall = []
+    for nm, s in snap.items():
+        if nm in exempt:
+            continue
+        tgt = (s["required"] - s["worked"]) if s["required"] > 0 else target_global
+        if tgt <= 0:
+            continue
+        cnt = worker_counts.get(nm, 0)
+        reached[nm] = cnt >= tgt
+        if cnt < tgt:
+            shortfall.append({"name": nm, "target": tgt, "count": cnt})
+    shortfall.sort(key=lambda x: x["target"] - x["count"], reverse=True)
+
     rows = []
     for d in range(1, record.days + 1):
         ddate = record.start_date + timedelta(days=d - 1) if record.start_date else None
-        cells = per_day.get(str(d - 1), {})
+        cells = per_day.get(d - 1, {})
         rows.append({"day": d, "date": ddate, "cells": [(s, cells.get(s, [])) for s in shifts]})
 
     def _status(nm):
@@ -897,7 +894,6 @@ def schedule_result(request, pk):
             return "ok" if reached[nm] else "no"
         return "exempt"
 
-    snap = {s["name"]: s for s in (record.worker_snapshot or [])}
     count_rows = sorted(
         [(nm, cnt, _status(nm),
           snap.get(nm, {}).get("worked", 0),
@@ -905,12 +901,11 @@ def schedule_result(request, pk):
          for nm, cnt in worker_counts.items()],
         key=lambda kv: (0 if kv[2] == "ok" else 1, -kv[1]),
     )
-    shortfall = rj.get("shortfall", [])
+
     capacity = None
     if record.team:
         people_count = len(worker_counts)
         exempt_count = len([n for n in (record.exempt_names or []) if n in worker_counts])
-        # 用快速参数 + 排班时已求得的真实达标人数，避免再次跑求解器（省 5~10 秒）
         capacity = capacity_quick(
             people_count, record.daily_total or 0, record.days,
             (record.rest_block or {}).get("max", 4),
@@ -920,7 +915,7 @@ def schedule_result(request, pk):
         capacity["needed_exempt"] = max(0, (people_count - exempt_count) - reached_count)
         capacity["people"] = people_count
         capacity["daily"] = record.daily_total or 0
-        capacity["target"] = record.min_shift_target or 0
+        capacity["target"] = target_global
     return render(request, "scheduler/schedule_result.html", {
         "record": record,
         "shifts": shifts,
@@ -934,9 +929,9 @@ def schedule_result(request, pk):
             if worker_counts else 0,
             "reached_count": sum(1 for v in reached.values() if v),
             "reached_total": len(reached),
-            "single_rest": rj.get("single_rest", 0),
-            "rest_violations": rj.get("rest_run_violations", 0),
-            "target": rj.get("target"),
+            "single_rest": record.single_rest,
+            "rest_violations": record.rest_run_violations,
+            "target": target_global or None,
         },
     })
 

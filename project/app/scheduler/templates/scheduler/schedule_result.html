@@ -12,7 +12,7 @@
     </div>
 </div>
 
-{% if record.status == 'INFEASIBLE' or not record.result_json %}
+{% if record.status == 'INFEASIBLE' %}
 <div class="glass-card">
     <div class="alert alert-danger mb-0">
         <b>本次排班无解：</b>{{ record.message }}
