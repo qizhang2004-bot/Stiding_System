@@ -290,7 +290,9 @@
             <tbody>
             {% for p, worked in rows %}
                 <tr data-roles="{% for r in p.roles.all %}{{ r.name }}{% if not forloop.last %},{% endif %}{% endfor %}">
-                    <td class="fw-bold">{{ p.name }}</td>
+                    <td class="fw-bold">{{ p.name }}
+                        {% if not p.is_active %}<span class="badge text-bg-secondary ms-1" style="border-radius:8px;">已禁用</span>{% endif %}
+                    </td>
                     <td>
                         {% for r in p.roles.all %}
                             <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ r.name }}</span>

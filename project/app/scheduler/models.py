@@ -83,6 +83,8 @@ class Person(models.Model):
         help_text="导入时的已上班数（排班后按日期自动累计）")
     required_shifts = models.IntegerField("应上班数", default=0,
         help_text="本月应上班班数（每人班次要求，0 表示使用全局最少班数）")
+    is_active = models.BooleanField("是否启用", default=True,
+        help_text="禁用的人员不参与排班（但仍保留在人员列表里）")
 
     class Meta:
         verbose_name = "人员"

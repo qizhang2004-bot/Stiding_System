@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from ortools.sat.python import cp_model
@@ -150,36 +151,123 @@ def _min_work_days(days: int, rmax: int) -> int:
     return days
 
 
+def _solve_max_fillable(people: int, daily: int, days: int,
+                        rest_max: int, target: int, exempt_count: int,
+                        time_limit: float = 3.0) -> int:
+    """用 CP-SAT 精确求解「最多能让几名非豁免人员达到 target 班」。
+
+    之前的公式 `K*target + (N-K)*min_work <= total` 只做总班数的线性估计，
+    完全忽略了「任意 10 天 ≤6 班」这个工作窗口：当 target 逼近窗口上限时，
+    满班者的作息极其刚性，多人同时满班在组合上排不开，导致公式严重高估
+    （例如 29 人每天 17 人、目标 18 班，公式算 27 人、真实只有 12 人）。
+    因此这里直接交给求解器算出真实值，杜绝「吹牛」。
+    """
+    if people <= 0 or daily <= 0 or days <= 0:
+        return 0
+    non_exempt = max(0, people - exempt_count)
+    if non_exempt == 0 or target <= 0:
+        return non_exempt
+    # 目标超过每人最多班数（工作窗口上限）时，没有人能满班
+    if target > _max_work_in_month(days, 10, 6):
+        return 0
+
+    m = cp_model.CpModel()
+    y: Dict[Tuple[int, int], Any] = {}
+    r: Dict[Tuple[int, int], Any] = {}
+    for p in range(people):
+        for d in range(days):
+            y[p, d] = m.new_bool_var(f"y_{p}_{d}")
+            r[p, d] = m.new_bool_var(f"r_{p}_{d}")
+            m.add(r[p, d] == y[p, d].Not())
+
+    # 每天下井总人数
+    for d in range(days):
+        m.add(sum(y[p, d] for p in range(people)) == daily)
+
+    # 仅非豁免人员受工作窗口 + 连休约束（与 build_schedule 一致）
+    rmin = 2
+    for p in range(non_exempt):
+        # 工作窗口：任意 10 天最多 6 班
+        for start in range(days - 10 + 1):
+            m.add(sum(y[p, d] for d in range(start, start + 10)) <= 6)
+        # 连休：不允许单休（含边界）、不允许连休超过 rest_max
+        for length in range(1, rmin):
+            for d in range(1, days - length):
+                m.add(y[p, d - 1]
+                      + sum(r[p, dd] for dd in range(d, d + length))
+                      + y[p, d + length] <= length + 1)
+            if length <= days - 1:
+                m.add(sum(r[p, dd] for dd in range(0, length)) + y[p, length] <= length)
+            if length <= days - 1:
+                m.add(y[p, days - length - 1]
+                      + sum(r[p, dd] for dd in range(days - length, days)) <= length)
+        for start in range(days - rest_max):
+            m.add(sum(r[p, d] for d in range(start, start + rest_max + 1)) <= rest_max)
+
+    # 达标标记：班数 >= target
+    reached = []
+    for p in range(non_exempt):
+        c = m.new_int_var(0, days, f"cnt_{p}")
+        m.add(c == sum(y[p, d] for d in range(days)))
+        rr = m.new_bool_var(f"reached_{p}")
+        m.add(c >= target).only_enforce_if(rr)
+        m.add(c <= target - 1).only_enforce_if(rr.Not())
+        reached.append(rr)
+
+    m.maximize(sum(reached))
+    solver = cp_model.CpSolver()
+    solver.parameters.num_search_workers = 8
+    if time_limit:
+        solver.parameters.max_time_in_seconds = float(time_limit)
+    status = solver.solve(m)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return int(solver.objective_value)
+    return 0
+
+
+def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4) -> dict:
+    """快速容量参数（纯计算、不求解）：total / min_work / max_work。"""
+    return {
+        "total": daily * days,
+        "min_work": _min_work_days(days, rest_max),
+        "max_work": _max_work_in_month(days, 10, 6),
+    }
+
+
+@lru_cache(maxsize=512)
 def capacity_analysis(people: int, daily: int, days: int,
-                      rest_max: int = 4, target: int = 18) -> dict:
+                      rest_max: int = 4, target: int = 18, exempt_count: int = 0) -> dict:
     """容量预估：按人数、每天应上人数、周期天数等计算最多能满班几人、需要豁免几人。
 
     参数:
-        people    该班人数
-        daily     每天应上人数（该班应上人数）
-        days      周期实际天数
-        rest_max  连休最大天数（默认 4）
-        target    每人应上最少班数（默认 18）
+        people       总人数（含豁免）
+        daily        每天应上人数（该班应上人数）
+        days         周期实际天数
+        rest_max     连休最大天数（默认 4，仅约束非豁免人员）
+        target       每人应上最少班数（默认 18）
+        exempt_count 已豁免人数（豁免人员不参与休息计算，可上 0 班）
 
     返回:
         total        周期总班次 = daily * days
-        min_work     连休规则限定的每人最少班数
+        min_work     连休规则限定的每人最少班数（仅非豁免人员）
         max_work     每人最多班数（10 天 ≤6 班窗口）
-        max_fillable 最多能有多少人排满 target
+        max_fillable 最多能有多少人排满 target（非豁免人员）—— 由求解器精确计算
         needed_exempt 还需要豁免多少人（否则会有人排不满）
+
+    结果带缓存（lru_cache）：同一组参数只求解一次，之后命中缓存毫秒级返回，
+    避免每次页面刷新都跑一遍 CP-SAT（那会花 5~10 秒）。
     """
-    total = daily * days
-    min_work = _min_work_days(days, rest_max)
-    max_work = _max_work_in_month(days, 10, 6)
-    if target <= 0 or max_work <= min_work or total <= 0 or people == 0:
-        max_fillable = people
-    else:
-        # K 人满 target，其余 (people-K) 人至少 min_work：K*target + (people-K)*min_work <= total
-        max_fillable = min(people, (total - people * min_work) // (target - min_work))
-        max_fillable = max(0, max_fillable)
+    base = capacity_quick(people, daily, days, rest_max)
+    non_exempt = max(0, people - exempt_count)
+    # 精确求解真实的最大满班人数，替代过去会高估的线性公式；
+    # 时限 3 秒：超时返回已找到的最优下界（保守、不吹牛），避免页面卡 10 秒。
+    max_fillable = _solve_max_fillable(people, daily, days, rest_max,
+                                       target, exempt_count, time_limit=3.0)
+    max_fillable = max(0, min(non_exempt, max_fillable))
     return {
-        "total": total, "min_work": min_work, "max_work": max_work,
-        "max_fillable": max_fillable, "needed_exempt": max(0, people - max_fillable),
+        "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
+        "max_fillable": max_fillable, "needed_exempt": max(0, non_exempt - max_fillable),
+        "people": people, "daily": daily, "target": target,
     }
 
 
@@ -403,18 +491,24 @@ def build_schedule(
                     m.add(s >= cnt)
 
         # 约束 4：连续工作窗口（任意 length 天内最多 max_work 班）
+        # 豁免人员不参与休息/窗口计算，可自由上任意班（含 0 班）
         if window:
             wlen = int(window.get("length", 10))
             wmax = int(window.get("max_work", 6))
             for w in range(len(names)):
+                if names[w] in exempt:
+                    continue
                 for start in range(days - wlen + 1):
                     m.add(sum(y[w, d] for d in range(start, start + wlen)) <= wmax)
 
         # 约束 5：休息规则（连休天数 ∈ [min, max]，硬约束）
+        # 豁免人员不参与连休规则，可自由休息（连休 0 天、1 天或任意天）
         if rest_block:
             rmin = int(rest_block.get("min", 2))
             rmax = int(rest_block.get("max", 4))
             for w in range(len(names)):
+                if names[w] in exempt:
+                    continue
                 for length in range(1, rmin):
                     # 中间：上班 + length 个休息 + 上班（禁止）
                     for d in range(1, days - length):
@@ -445,6 +539,7 @@ def build_schedule(
         over_dev: Dict[str, Any] = {}
         under_dev: Dict[str, Any] = {}
         reached_v: Dict[str, Any] = {}
+        exempt_count_vars: List[Any] = []
         for w in range(len(names)):
             nm = names[w]
             c = m.new_int_var(0, days, f"cnt_{nm}")
@@ -456,7 +551,9 @@ def build_schedule(
             tgt = int(req.get("target", target)) if req else target
 
             if nm in exempt:
-                # 豁免人员：不施加达标/接近目标压力，但仍可给硬性上下限
+                # 豁免人员：不施加达标/接近目标压力、不参与休息计算；
+                # 只收集其班数用于“尽量少且均衡”的软目标
+                exempt_count_vars.append(c)
                 if "min" in req or "max" in req:
                     m.add(c >= int(req.get("min", 0)))
                     m.add(c <= int(req.get("max", days)))
@@ -506,9 +603,13 @@ def build_schedule(
                             shift_mismatch_vars.append(x[w, d, s])
 
         # 解提示：按“上6休4”错峰模式给每个工人一个初始作息，帮助搜索更快找到好解
-        # （仅当启用了连休硬约束时使用，该模式与连休规则吻合；提示只是引导，不强制）
+        # （仅当启用了连休硬约束时使用；豁免人员不参与，给 0 提示即尽量少排）
         if rest_block and not with_deviation:
             for w in range(len(names)):
+                if names[w] in exempt:
+                    for d in range(days):
+                        m.add_hint(y[w, d], 0)
+                    continue
                 phase = (w * 4) % 10
                 for d in range(days):
                     m.add_hint(y[w, d], 1 if (d + phase) % 10 < 6 else 0)
@@ -519,6 +620,7 @@ def build_schedule(
             "over_dev": over_dev, "under_dev": under_dev,
             "single_rest_vars": single_rest_vars,
             "shift_mismatch_vars": shift_mismatch_vars,
+            "exempt_count_vars": exempt_count_vars,
         }
         return m, track
 
@@ -547,10 +649,12 @@ def build_schedule(
                 result.per_day[d][s] = [
                     names[w] for w in range(len(names)) if solver.value(x[w, d, s])
                 ]
-        # 重算单休与连休超限
+        # 重算单休与连休超限（豁免人员不参与休息计算，跳过统计）
         _sr, _rv = 0, 0
         rb = rest_block
         for w in range(len(names)):
+            if names[w] in exempt:
+                continue
             for d in range(1, days - 1):
                 if (solver.value(y[w, d - 1]) and not solver.value(y[w, d])
                         and solver.value(y[w, d + 1])):
@@ -609,6 +713,11 @@ def build_schedule(
         obj = sum(t2["over_dev"][nm] + t2["under_dev"][nm] for nm in t2["over_dev"]) * w_tgt
         obj += sum(t2["single_rest_vars"]) * w_sr
         obj += sum(t2["shift_mismatch_vars"]) * weights.get("shift_mismatch", 1)
+        # 豁免人员尽量少且均衡：最小化其最大班数（剩余班数均匀分割）
+        if t2["exempt_count_vars"]:
+            exempt_max = m2.new_int_var(0, days, "exempt_max")
+            m2.add_max_equality(exempt_max, t2["exempt_count_vars"])
+            obj += exempt_max * weights.get("exempt_balance", 5)
         m2.minimize(obj)
         sol2, st2 = _solve(m2, phase2_seconds)
         if st2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):

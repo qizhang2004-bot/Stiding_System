@@ -11,7 +11,7 @@ from django.views.decorators.http import require_http_methods
 from .models import Assignment, Group, Person, Role, Schedule, Team, UserProfile
 
 # 排班算法模型（单一文件，见 scheduling.py 的模块说明）
-from project.app.scheduler.scheduling import build_schedule, capacity_analysis
+from project.app.scheduler.scheduling import build_schedule, capacity_analysis, capacity_quick
 
 # 工作窗口（固定：任意 10 天最多上 6 班）
 DEFAULT_WORK_WINDOW = {"length": 10, "max_work": 6}
@@ -378,24 +378,24 @@ def team_manage(request):
     min_tgt = default_team.min_shift_target if default_team else 18
     default_rest_max = max(2, (period_days - max(0, min_tgt)) // 3)
 
-    # 容量预估（提示最多能有多少人排满，需要豁免几人）
+    # 容量预估（提示最多能有多少人排满，需要豁免几人；只统计启用人员）
     capacity = None
     if default_team:
-        people_count = len(persons)
-        _cap = capacity_analysis(
+        people_count = Person.objects.filter(team=default_team, is_active=True).count()
+        exempt_count = len([n for n in (default_team.exempt_names or []) if
+                            Person.objects.filter(team=default_team, name=n, is_active=True).exists()])
+        capacity = capacity_analysis(
             people_count, default_team.daily_headcount or 0, period_days,
             (default_team.rest_block or {}).get("max", 4),
-            default_team.min_shift_target or 0,
+            default_team.min_shift_target or 0, exempt_count,
         )
-        _cap["people"] = people_count
-        _cap["daily"] = default_team.daily_headcount or 0
-        _cap["target"] = default_team.min_shift_target or 0
-        capacity = _cap
 
-    # 每个岗位的持有人数（用于实时"岗位条件可行性"检查）
+    # 每个岗位的持有人数（用于实时"岗位条件可行性"检查；只统计启用人员）
     role_holder_counts = {}
     if default_team:
         for p in persons:
+            if not p.is_active:
+                continue
             for rn in p.roles.values_list("name", flat=True):
                 role_holder_counts[rn] = role_holder_counts.get(rn, 0) + 1
 
@@ -428,7 +428,7 @@ def _run_generate(request, team: Team):
         return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}&error=daily")
     y, m = current_period()
     start, end, days = period_range(y, m)
-    persons = Person.objects.filter(team=team).prefetch_related("roles").order_by("name")
+    persons = Person.objects.filter(team=team, is_active=True).prefetch_related("roles").order_by("name")
     if not persons:
         return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}")
     worker_snapshot = [
@@ -444,12 +444,13 @@ def _run_generate(request, team: Team):
     for p in persons:
         default_shift_map[p.name] = p.default_shift
 
-    # 容量预估：最多能有多少人排满目标
+    # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
+    non_exempt_count = len([p for p in persons if p.name not in exempt_set])
     cap = capacity_analysis(
         len(persons), team.daily_headcount or 0, days,
         (team.rest_block or {}).get("max", 4), target_global,
+        exempt_count=len(persons) - non_exempt_count,
     )
-    non_exempt_count = len([p for p in persons if p.name not in exempt_set])
     hard_targets = non_exempt_count <= cap["max_fillable"]
 
     base_config = {
@@ -475,7 +476,8 @@ def _run_generate(request, team: Team):
             if tgt <= 0 or p.name in exempt_set:
                 continue
             if hard:
-                req[p.name] = {"target": tgt, "min": tgt}
+                # 非豁免恰好达到目标（不超排），剩余班数交由豁免人员分割
+                req[p.name] = {"target": tgt, "min": tgt, "max": tgt}
             else:
                 req[p.name] = {"target": tgt}
         return req
@@ -594,6 +596,7 @@ def person_edit(request, person_id):
         team_id = request.POST.get("team")
         person.team = Team.objects.filter(id=team_id).first() if team_id else None
         person.default_shift = request.POST.get("default_shift") or "早班"
+        person.is_active = request.POST.get("is_active") == "on"
         try:
             person.worked_so_far = max(0, int(request.POST.get("worked_so_far") or 0))
             person.required_shifts = max(0, int(request.POST.get("required_shifts") or 0))
@@ -906,15 +909,18 @@ def schedule_result(request, pk):
     capacity = None
     if record.team:
         people_count = len(worker_counts)
-        _cap = capacity_analysis(
+        exempt_count = len([n for n in (record.exempt_names or []) if n in worker_counts])
+        # 用快速参数 + 排班时已求得的真实达标人数，避免再次跑求解器（省 5~10 秒）
+        capacity = capacity_quick(
             people_count, record.daily_total or 0, record.days,
             (record.rest_block or {}).get("max", 4),
-            record.min_shift_target or 0,
         )
-        _cap["people"] = people_count
-        _cap["daily"] = record.daily_total or 0
-        _cap["target"] = record.min_shift_target or 0
-        capacity = _cap
+        reached_count = sum(1 for v in reached.values() if v)
+        capacity["max_fillable"] = reached_count
+        capacity["needed_exempt"] = max(0, (people_count - exempt_count) - reached_count)
+        capacity["people"] = people_count
+        capacity["daily"] = record.daily_total or 0
+        capacity["target"] = record.min_shift_target or 0
     return render(request, "scheduler/schedule_result.html", {
         "record": record,
         "shifts": shifts,
