@@ -153,7 +153,7 @@ def _min_work_days(days: int, rmax: int) -> int:
 
 def _solve_max_fillable(people: int, daily: int, days: int,
                         rest_max: int, target: int, exempt_count: int,
-                        time_limit: float = 3.0) -> int:
+                        time_limit: float = 15.0) -> int:
     """用 CP-SAT 精确求解「最多能让几名非豁免人员达到 target 班」。
 
     之前的公式 `K*target + (N-K)*min_work <= total` 只做总班数的线性估计，
@@ -260,9 +260,10 @@ def capacity_analysis(people: int, daily: int, days: int,
     base = capacity_quick(people, daily, days, rest_max)
     non_exempt = max(0, people - exempt_count)
     # 精确求解真实的最大满班人数，替代过去会高估的线性公式；
-    # 时限 3 秒：超时返回已找到的最优下界（保守、不吹牛），避免页面卡 10 秒。
+    # 时限 15 秒：确保 CP-SAT 求到最优（短时限会返回次优下界，导致「需豁免人数」被低估，
+    # 例如 25 人场景 3 秒只求到 17、真实最优是 21）。结果有 lru_cache 缓存，同参数只算一次。
     max_fillable = _solve_max_fillable(people, daily, days, rest_max,
-                                       target, exempt_count, time_limit=3.0)
+                                       target, exempt_count, time_limit=15.0)
     max_fillable = max(0, min(non_exempt, max_fillable))
     return {
         "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
