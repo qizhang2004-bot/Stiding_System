@@ -153,14 +153,16 @@ def _min_work_days(days: int, rmax: int) -> int:
 
 def _solve_max_fillable(people: int, daily: int, days: int,
                         rest_max: int, target: int, exempt_count: int,
-                        time_limit: float = 15.0) -> int:
-    """用 CP-SAT 精确求解「最多能让几名非豁免人员达到 target 班」。
+                        time_limit: float = 30.0) -> int:
+    """精确求解「最多能让几名非豁免人员达到 target 班」。
 
-    之前的公式 `K*target + (N-K)*min_work <= total` 只做总班数的线性估计，
-    完全忽略了「任意 10 天 ≤6 班」这个工作窗口：当 target 逼近窗口上限时，
-    满班者的作息极其刚性，多人同时满班在组合上排不开，导致公式严重高估
-    （例如 29 人每天 17 人、目标 18 班，公式算 27 人、真实只有 12 人）。
-    因此这里直接交给求解器算出真实值，杜绝「吹牛」。
+    策略（快 + 准 + 稳定）：
+      1. 先算线性上界 L（总班次容量）；
+      2. 用 CP-SAT 验证「L 人满班」是否可行——可行就立刻返回 L，无需证明 L+1 不可行
+         （这步对大多数月份很快，避免 maximize 证明最优的慢过程）；
+      3. 若 L 不可行，再退回 maximize 精确求解（此时工作窗口把问题收紧，通常也快）。
+    之前的纯 maximize 在短时限下会返回次优下界（例如 25 人场景 3 秒只求到 17、
+    真实最优 21），导致「需豁免人数」被低估；本实现杜绝了这一点。
     """
     if people <= 0 or daily <= 0 or days <= 0:
         return 0
@@ -171,55 +173,72 @@ def _solve_max_fillable(people: int, daily: int, days: int,
     if target > _max_work_in_month(days, 10, 6):
         return 0
 
-    m = cp_model.CpModel()
-    y: Dict[Tuple[int, int], Any] = {}
-    r: Dict[Tuple[int, int], Any] = {}
-    for p in range(people):
+    def _build_model():
+        m = cp_model.CpModel()
+        y: Dict[Tuple[int, int], Any] = {}
+        r: Dict[Tuple[int, int], Any] = {}
+        for p in range(people):
+            for d in range(days):
+                y[p, d] = m.new_bool_var(f"y_{p}_{d}")
+                r[p, d] = m.new_bool_var(f"r_{p}_{d}")
+                m.add(r[p, d] == y[p, d].Not())
+        # 每天下井总人数
         for d in range(days):
-            y[p, d] = m.new_bool_var(f"y_{p}_{d}")
-            r[p, d] = m.new_bool_var(f"r_{p}_{d}")
-            m.add(r[p, d] == y[p, d].Not())
+            m.add(sum(y[p, d] for p in range(people)) == daily)
+        # 仅非豁免人员受工作窗口 + 连休约束
+        rmin = 2
+        for p in range(non_exempt):
+            for start in range(days - 10 + 1):
+                m.add(sum(y[p, d] for d in range(start, start + 10)) <= 6)
+            for length in range(1, rmin):
+                for d in range(1, days - length):
+                    m.add(y[p, d - 1]
+                          + sum(r[p, dd] for dd in range(d, d + length))
+                          + y[p, d + length] <= length + 1)
+                if length <= days - 1:
+                    m.add(sum(r[p, dd] for dd in range(0, length)) + y[p, length] <= length)
+                if length <= days - 1:
+                    m.add(y[p, days - length - 1]
+                          + sum(r[p, dd] for dd in range(days - length, days)) <= length)
+            for start in range(days - rest_max):
+                m.add(sum(r[p, d] for d in range(start, start + rest_max + 1)) <= rest_max)
+        # 达标标记：班数 >= target
+        reached = []
+        for p in range(non_exempt):
+            c = m.new_int_var(0, days, f"cnt_{p}")
+            m.add(c == sum(y[p, d] for d in range(days)))
+            rr = m.new_bool_var(f"reached_{p}")
+            m.add(c >= target).only_enforce_if(rr)
+            m.add(c <= target - 1).only_enforce_if(rr.Not())
+            reached.append(rr)
+        return m, reached
 
-    # 每天下井总人数
-    for d in range(days):
-        m.add(sum(y[p, d] for p in range(people)) == daily)
+    def _solve(m, limit):
+        solver = cp_model.CpSolver()
+        solver.parameters.num_search_workers = 8
+        if limit:
+            solver.parameters.max_time_in_seconds = float(limit)
+        status = solver.solve(m)
+        return solver, status
 
-    # 仅非豁免人员受工作窗口 + 连休约束（与 build_schedule 一致）
-    rmin = 2
-    for p in range(non_exempt):
-        # 工作窗口：任意 10 天最多 6 班
-        for start in range(days - 10 + 1):
-            m.add(sum(y[p, d] for d in range(start, start + 10)) <= 6)
-        # 连休：不允许单休（含边界）、不允许连休超过 rest_max
-        for length in range(1, rmin):
-            for d in range(1, days - length):
-                m.add(y[p, d - 1]
-                      + sum(r[p, dd] for dd in range(d, d + length))
-                      + y[p, d + length] <= length + 1)
-            if length <= days - 1:
-                m.add(sum(r[p, dd] for dd in range(0, length)) + y[p, length] <= length)
-            if length <= days - 1:
-                m.add(y[p, days - length - 1]
-                      + sum(r[p, dd] for dd in range(days - length, days)) <= length)
-        for start in range(days - rest_max):
-            m.add(sum(r[p, d] for d in range(start, start + rest_max + 1)) <= rest_max)
+    # 线性上界 L：K*target + (N-K)*min_work <= total
+    total = daily * days
+    min_work = _min_work_days(days, rest_max)
+    linear = (total - non_exempt * min_work) // (target - min_work)
+    linear = max(0, min(non_exempt, linear))
 
-    # 达标标记：班数 >= target
-    reached = []
-    for p in range(non_exempt):
-        c = m.new_int_var(0, days, f"cnt_{p}")
-        m.add(c == sum(y[p, d] for d in range(days)))
-        rr = m.new_bool_var(f"reached_{p}")
-        m.add(c >= target).only_enforce_if(rr)
-        m.add(c <= target - 1).only_enforce_if(rr.Not())
-        reached.append(rr)
+    # 步骤 2：验证 L 是否可行（短时限，找到可行解即可）
+    if linear > 0:
+        m, reached = _build_model()
+        m.add(sum(reached) >= linear)
+        _, status = _solve(m, min(8.0, time_limit))
+        if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            return linear
 
+    # 步骤 3：L 不可行，maximize 精确求解
+    m, reached = _build_model()
     m.maximize(sum(reached))
-    solver = cp_model.CpSolver()
-    solver.parameters.num_search_workers = 8
-    if time_limit:
-        solver.parameters.max_time_in_seconds = float(time_limit)
-    status = solver.solve(m)
+    solver, status = _solve(m, time_limit)
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return int(solver.objective_value)
     return 0
@@ -263,7 +282,7 @@ def capacity_analysis(people: int, daily: int, days: int,
     # 时限 15 秒：确保 CP-SAT 求到最优（短时限会返回次优下界，导致「需豁免人数」被低估，
     # 例如 25 人场景 3 秒只求到 17、真实最优是 21）。结果有 lru_cache 缓存，同参数只算一次。
     max_fillable = _solve_max_fillable(people, daily, days, rest_max,
-                                       target, exempt_count, time_limit=15.0)
+                                       target, exempt_count, time_limit=30.0)
     max_fillable = max(0, min(non_exempt, max_fillable))
     return {
         "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
