@@ -790,6 +790,7 @@ def shift_board(request):
         "shifts": FIXED_SHIFTS,
         "groups": groups,
         "selected_group": selected_group,
+        "user_group": ug,
         "schedule_count": len(schedules),
     })
 
