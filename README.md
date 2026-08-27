@@ -204,6 +204,66 @@ Stiding_System/
 
 ---
 
+## 服务器部署
+
+线上地址：https://stiding.qizhang2004.cn/
+
+部署架构：**Cloudflare（DNS + 代理）→ Nginx（443 SSL 反代）→ Gunicorn（127.0.0.1:8001）→ Django**
+
+### 配置文件位置
+
+| 用途 | 路径 |
+| --- | --- |
+| 项目目录 | `/home/ubuntu/Stiding_System` |
+| Python 虚拟环境 | `/home/ubuntu/Stiding_System/.venv` |
+| systemd 服务 | `/etc/systemd/system/stiding.service` |
+| 环境变量（SECRET_KEY） | `/etc/stiding.env` |
+| Nginx 站点配置 | `/etc/nginx/sites-available/stiding`（软链到 `sites-enabled/`） |
+| Gunicorn 配置 | 写在 systemd 服务的 `ExecStart` 里（绑 `127.0.0.1:8001`） |
+| 静态文件目录 | `/home/ubuntu/Stiding_System/project/staticfiles` |
+| SQLite 数据库 | `/home/ubuntu/Stiding_System/project/db.sqlite3` |
+| SSL 证书 / 私钥 | `/home/ubuntu/ubuntu.pem` / `/home/ubuntu/ubuntu.key`（通配符 `*.qizhang2004.cn`） |
+| 生产配置 | `project/settings/prod.py` |
+
+### 缓存
+
+- **静态文件 `/static/`**：Nginx 加了 `expires 30d` + `Cache-Control: max-age=2592000`（30 天强缓存）。
+- **动态页面**：不缓存（排班数据、登录态会变化，不应在 Nginx 层缓存）。
+- Bootstrap 已本地化到 `scheduler/static/scheduler/`，不依赖 jsdelivr CDN，国内访问稳定。
+
+### 自动部署
+
+push 到 `main` 分支会触发 GitHub Actions（`.github/workflows/Deploy.yml`）：
+SSH 到服务器 → `git pull` → `pip install` → `migrate` → `collectstatic` → `systemctl restart stiding`。
+
+> 依赖 GitHub 仓库的三个 Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_KEY`。
+
+### 常用运维命令
+
+```bash
+# 查看服务状态 / 实时日志
+systemctl status stiding
+journalctl -u stiding -f
+
+# 重启服务
+sudo systemctl restart stiding
+
+# 重载 nginx
+sudo nginx -t && sudo systemctl reload nginx
+
+# 手动部署（不用 GitHub Actions）
+cd /home/ubuntu/Stiding_System
+git pull origin main
+source .venv/bin/activate
+export DJANGO_SETTINGS_MODULE=project.settings.prod
+pip install -r requirements.txt
+python manage.py migrate --noinput
+python manage.py collectstatic --noinput
+sudo systemctl restart stiding
+```
+
+---
+
 ## License
 
 内部项目，未指定开源许可证。
