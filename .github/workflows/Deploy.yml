@@ -1,0 +1,62 @@
+name: Deploy Django
+
+# 什么时候触发
+on:
+  push:
+    branches:
+      - main
+
+# 要执行的任务
+jobs:
+
+  deploy:
+
+    # GitHub提供的临时运行环境
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # 连接服务器并执行命令
+      - name: Deploy to server
+
+        uses: appleboy/ssh-action@master
+
+        with:
+
+          # 服务器地址
+          host: ${{ secrets.SERVER_HOST }}
+
+          # SSH用户名
+          username: ${{ secrets.SERVER_USER }}
+
+          # SSH私钥
+          key: ${{ secrets.SERVER_KEY }}
+
+          # 登录服务器后执行的命令
+          script: |
+
+            set -e
+
+            # 进入项目目录
+            cd /home/ubuntu/Stiding_System
+
+            # 拉取GitHub最新代码
+            git pull origin main
+
+            # 进入Python虚拟环境
+            source /home/ubuntu/Stiding_System/.venv/bin/activate
+
+            # 部署环境显式使用 prod 配置
+            export DJANGO_SETTINGS_MODULE=project.settings.prod
+
+            # 更新Python依赖
+            pip install -r requirements.txt
+
+            # Django数据库迁移
+            python manage.py migrate --noinput
+
+            # 收集静态文件
+            python manage.py collectstatic --noinput
+
+            # 重启Gunicorn
+            sudo systemctl restart stiding
