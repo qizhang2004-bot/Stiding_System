@@ -188,8 +188,12 @@ def capacity_analysis(people: int, daily: int, days: int,
     """
     base = capacity_quick(people, daily, days, rest_max)
     # 快速公式（纯计算，秒开）
-    max_fillable = (base["total"] // target) if target > 0 else people
-    max_fillable = max(0, min(people, max_fillable))
+    if target > base["max_work"]:
+        # 目标班数超过工作窗口上限（10 天 ≤6 班 → 每人最多 max_work 班），没人能满
+        max_fillable = 0
+    else:
+        max_fillable = (base["total"] // target) if target > 0 else people
+        max_fillable = max(0, min(people, max_fillable))
     return {
         "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
         "max_fillable": max_fillable, "needed_exempt": max(0, people - max_fillable),
