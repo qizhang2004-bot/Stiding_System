@@ -41,7 +41,7 @@
         {% empty %}
         <span class="text-muted-light">该队组下还没有班组。</span>
         {% endfor %}
-        {% if is_super %}
+        {% if can_manage %}
         <form method="post" class="d-flex gap-2 ms-2">
             {% csrf_token %}
             <input type="hidden" name="action" value="add_team">
@@ -62,7 +62,7 @@
 </div>
 
 <!-- 删除班组确认弹窗：必须输入「删除」两个字才能确认 -->
-{% if team and is_super %}
+{% if team and can_manage %}
 <div class="modal fade" id="delTeamModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content" style="border-radius:18px;">

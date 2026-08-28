@@ -352,34 +352,34 @@ def team_manage(request):
                 message = "已删除该人员。"
 
         elif action == "add_team":
-            if ug:
-                error = "队组账号不能新增班组（班组由超级管理员管理）。"
-            elif not selected_group:
+            tn = (request.POST.get("team_name") or "").strip()
+            # 队组管理员新增的班组自动归入自己的队组；超管需要先选队组
+            target_group = ug or selected_group
+            if not target_group:
                 error = "请先选择一个队组，再新增班组。"
+            elif not tn:
+                error = "请输入班组名称。"
             else:
-                tn = (request.POST.get("team_name") or "").strip()
-                if tn:
-                    Team.objects.get_or_create(group=selected_group, name=tn)
-                    message = f"已添加班组「{tn}」。"
-                    return redirect(f"{request.path}?group={selected_group.id}&team={tn}")
+                Team.objects.get_or_create(group=target_group, name=tn)
+                message = f"已添加班组「{tn}」。"
+                return redirect(f"{request.path}?team={tn}{gq}")
 
         elif action == "delete_team":
-            if ug:
-                error = "队组账号不能删除班组（班组由超级管理员管理）。"
+            tid = request.POST.get("team_id")
+            confirm = (request.POST.get("confirm_text") or "").strip()
+            team = Team.objects.filter(id=tid).first() if tid else None
+            if not team:
+                error = "班组不存在或已被删除。"
+            elif ug and team.group_id != ug.id:
+                error = "只能删除本队组的班组。"
+            elif confirm != "删除":
+                error = "确认失败：请输入「删除」两个字才能删除班组。"
             else:
-                tid = request.POST.get("team_id")
-                confirm = (request.POST.get("confirm_text") or "").strip()
-                team = Team.objects.filter(id=tid).first() if tid else None
-                if not team:
-                    error = "班组不存在或已被删除。"
-                elif confirm != "删除":
-                    error = "确认失败：请输入「删除」两个字才能删除班组。"
-                else:
-                    tname = team.name
-                    # 删除班组：其人员变为未分组，排班记录保留但失去班组归属
-                    team.delete()
-                    from urllib.parse import quote
-                    return redirect(f"{request.path}?deleted={quote(tname)}{gq}")
+                tname = team.name
+                # 删除班组：其人员变为未分组，排班记录保留但失去班组归属
+                team.delete()
+                from urllib.parse import quote
+                return redirect(f"{request.path}?deleted={quote(tname)}{gq}")
 
         elif action == "generate":
             team = teams.filter(id=request.POST.get("team_id")).first()
@@ -453,6 +453,7 @@ def team_manage(request):
         "period_days": period_days,
         "is_team_user": ug is not None,
         "is_super": user_role(request) == "super",
+        "can_manage": user_role(request) in ("super", "team_admin"),
         "can_edit": can_edit_team(request, default_team),
         "roles": Role.objects.order_by("name"),
         "message": message,
