@@ -152,12 +152,17 @@ def _min_work_days(days: int, rmax: int) -> int:
 
 
 
-def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4) -> dict:
-    """快速容量参数（纯计算、不求解）：total / min_work / max_work。"""
+def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4,
+                   target: int = 18) -> dict:
+    """快速容量参数（纯计算、不求解）：total / min_work / max_work。
+
+    max_work 由工作窗口决定：任意 10 天最多上 target//3 班（规则4）。
+    """
+    wmax = max(1, target // 3) if target > 0 else 6
     return {
         "total": daily * days,
         "min_work": _min_work_days(days, rest_max),
-        "max_work": _max_work_in_month(days, 10, 6),
+        "max_work": _max_work_in_month(days, 10, wmax),
     }
 
 
@@ -186,10 +191,10 @@ def capacity_analysis(people: int, daily: int, days: int,
         需豁免   = 总人数 - 最多能满
     例：每天 13 人 × 31 天 = 403 班，目标 18 班 → 最多能满 22 人，25 人需豁免 3 人。
     """
-    base = capacity_quick(people, daily, days, rest_max)
+    base = capacity_quick(people, daily, days, rest_max, target)
     # 快速公式（纯计算，秒开）
     if target > base["max_work"]:
-        # 目标班数超过工作窗口上限（10 天 ≤6 班 → 每人最多 max_work 班），没人能满
+        # 目标班数超过工作窗口上限，没人能满
         max_fillable = 0
     else:
         max_fillable = (base["total"] // target) if target > 0 else people

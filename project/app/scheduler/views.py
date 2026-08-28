@@ -411,11 +411,11 @@ def team_manage(request):
     else:
         team_role_options = ()
 
-    # 连休最大值默认值 ≈ (周期实际天数 - 最少上班班数) / 3
+    # 连休最大值默认值（规则4：最大连休 = 10 - 至少应上班数//3）
     y0, m0 = current_period()
     _, _, period_days = period_range(y0, m0)
     min_tgt = default_team.min_shift_target if default_team else 18
-    default_rest_max = max(2, (period_days - max(0, min_tgt)) // 3)
+    default_rest_max = max(2, 10 - (min_tgt // 3))
 
     # 容量预估（提示最多能有多少人排满，需要豁免几人；只统计启用人员）
     capacity = None
@@ -423,10 +423,15 @@ def team_manage(request):
         people_count = Person.objects.filter(team=default_team, is_active=True).count()
         exempt_count = len([n for n in (default_team.exempt_names or []) if
                             Person.objects.filter(team=default_team, name=n, is_active=True).exists()])
+        # 预估 target：全局「至少应上班数」优先，否则用每人「应上班数」的平均
+        if (default_team.min_shift_target or 0) > 0:
+            cap_target = default_team.min_shift_target
+        else:
+            reqs = [p.required_shifts for p in persons_list if p.required_shifts > 0]
+            cap_target = (sum(reqs) // len(reqs)) if reqs else 18
         capacity = capacity_analysis(
             people_count, default_team.daily_headcount or 0, period_days,
-            (default_team.rest_block or {}).get("max", 4),
-            default_team.min_shift_target or 0, exempt_count,
+            max(2, 10 - (cap_target // 3)), cap_target, exempt_count,
         )
 
     # 每个岗位的持有人数（用于实时"岗位条件可行性"检查；只统计启用人员）
@@ -484,11 +489,21 @@ def _run_generate(request, team: Team):
     for p in persons:
         default_shift_map[p.name] = p.default_shift
 
+    # 容量预估的 target：全局「至少应上班数」优先；否则用每人「应上班数」的平均
+    if target_global > 0:
+        cap_target = target_global
+    else:
+        reqs = [p.required_shifts for p in persons if p.required_shifts > 0]
+        cap_target = (sum(reqs) // len(reqs)) if reqs else 18
+    # 规则4：工作窗口动态 = 10 天最多上 cap_target//3 班；连休 2 ~ (10 - cap_target//3) 天
+    wmax = max(1, cap_target // 3) if cap_target > 0 else 6
+    rest_max = max(2, 10 - wmax)
+
     # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
     non_exempt_count = len([p for p in persons if p.name not in exempt_set])
     cap = capacity_analysis(
         len(persons), team.daily_headcount or 0, days,
-        (team.rest_block or {}).get("max", 4), target_global,
+        rest_max, cap_target,
         exempt_count=len(persons) - non_exempt_count,
     )
     hard_targets = non_exempt_count <= cap["max_fillable"]
@@ -502,17 +517,20 @@ def _run_generate(request, team: Team):
         "min_shift_target": team.min_shift_target or None,
         "worker_default_shift": default_shift_map,
         "exempt_workers": team.exempt_names or [],
-        "rest_block": dict(team.rest_block or {"min": 2, "max": 4}),
-        "work_window": dict(DEFAULT_WORK_WINDOW),
+        "rest_block": {"min": 2, "max": rest_max},
+        "work_window": {"length": 10, "max_work": wmax},
     }
 
     def _build_req(hard: bool):
         req = {}
         for p in persons:
-            if p.required_shifts > 0:
+            # 规则3：全局「至少应上班数」优先；未填时才用每人「应上班数」
+            if target_global > 0:
+                tgt = target_global - p.worked_so_far
+            elif p.required_shifts > 0:
                 tgt = p.required_shifts - p.worked_so_far
             else:
-                tgt = target_global
+                tgt = 0
             if tgt <= 0 or p.name in exempt_set:
                 continue
             if hard:
@@ -868,7 +886,7 @@ def schedule_result(request, pk):
     worker_counts = {nm: 0 for nm in snap}
     worker_counts.update(wc)
 
-    # 实时重算达标 / 未达标（目标 = required - worked，或全局最少班数）
+    # 实时重算达标 / 未达标（规则3：全局「至少应上班数」优先，否则每人「应上班数」）
     exempt = set(record.exempt_names or [])
     target_global = record.min_shift_target or 0
     reached = {}
@@ -876,7 +894,12 @@ def schedule_result(request, pk):
     for nm, s in snap.items():
         if nm in exempt:
             continue
-        tgt = (s["required"] - s["worked"]) if s["required"] > 0 else target_global
+        if target_global > 0:
+            tgt = target_global - s["worked"]
+        elif s["required"] > 0:
+            tgt = s["required"] - s["worked"]
+        else:
+            tgt = 0
         if tgt <= 0:
             continue
         cnt = worker_counts.get(nm, 0)
@@ -911,6 +934,7 @@ def schedule_result(request, pk):
         capacity = capacity_quick(
             people_count, record.daily_total or 0, record.days,
             (record.rest_block or {}).get("max", 4),
+            target_global if target_global > 0 else 18,
         )
         reached_count = sum(1 for v in reached.values() if v)
         capacity["max_fillable"] = reached_count
