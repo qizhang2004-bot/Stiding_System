@@ -393,10 +393,9 @@ def team_manage(request):
     # 该班人员（含按日期自动计算的已上班数）
     persons = Person.objects.filter(team=default_team).select_related("team").prefetch_related("roles").order_by("name") \
         if default_team else Person.objects.none()
-    schedule_map = {s.team_id: s for s in Schedule.objects.filter(team=default_team).order_by("-created_at")} \
-        if default_team else {}
-    # 批量计算已上班数（一次查询所有明细，避免 N+1）
-    latest_schedule = schedule_map.get(default_team.id) if default_team else None
+    # 批量计算已上班数：取该班组最新的一份排班（order_by -created_at 后取第一条）
+    latest_schedule = Schedule.objects.filter(team=default_team).order_by("-created_at").first() \
+        if default_team else None
     persons_list = list(persons)
     worked_map = _worked_auto_map(persons_list, latest_schedule) if latest_schedule else {}
     rows = [(p, worked_map.get(p.id, p.worked_so_far)) for p in persons_list]
