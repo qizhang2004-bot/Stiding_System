@@ -443,6 +443,9 @@ def team_manage(request):
             for rn in p.roles.values_list("name", flat=True):
                 role_holder_counts[rn] = role_holder_counts.get(rn, 0) + 1
 
+    # 启用人数（参与排班的人数，前端「约束实时自检」用它算需豁免人数）
+    active_person_count = Person.objects.filter(team=default_team, is_active=True).count() if default_team else 0
+
     return render(request, "scheduler/team_manage.html", {
         "teams": teams,
         "team": default_team,
@@ -451,6 +454,7 @@ def team_manage(request):
         "selected_group": selected_group,
         "rows": rows,
         "team_persons": [p for p, _ in rows],
+        "active_person_count": active_person_count,
         "team_role_options": team_role_options,
         "role_holder_counts": role_holder_counts,
         "default_rest_max": default_rest_max,

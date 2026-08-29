@@ -434,7 +434,7 @@ document.querySelector('#constraintForm button[formaction]')?.addEventListener('
 // ---- 约束实时自检 ----
 const DAYS = {{ period_days }};
 const HOLDERS = JSON.parse(document.getElementById('holdersData').textContent);
-const TOTAL_PEOPLE = {{ team_persons|length }};
+const TOTAL_PEOPLE = {{ active_person_count }};
 function minWorkDays(days, rmax) {
     for (let w = 0; w <= days; w++) {
         const rest = days - w;
@@ -446,6 +446,12 @@ function minWorkDays(days, rmax) {
         }
     }
     return days;
+}
+// 工作窗口「任意10天最多 wmax 班」下，days 天每人最多能上几班
+function maxWorkDays(days, wmax) {
+    const full = Math.floor(days / 10);
+    const rem = days % 10;
+    return Math.min(days, full * wmax + Math.min(wmax, rem));
 }
 function liveCheck() {
     const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
@@ -479,18 +485,23 @@ function liveCheck() {
         if (!role || cnt <= 0) return;
         const holders = HOLDERS[role] || 0;
         const roleTotal = cnt * DAYS;
+        // 该岗位最多能提供的班次 = 持有人数 × 每人最多班数
+        const wmax = Math.max(1, Math.floor(target / 3));
+        const maxWork = maxWorkDays(DAYS, wmax);
+        const cap = holders * maxWork;
         const avg = holders > 0 ? Math.floor(roleTotal / holders) : 0;
         const opLabel = op === '>=' ? '至少' : op === '<=' ? '至多' : '等于';
         let warn = '';
         if (holders === 0) {
             warn = ' <span class="text-danger fw-semibold">⚠ 该岗位没有人员</span>';
+        } else if ((op === '>=' || op === '==') && roleTotal > cap) {
+            warn = ' <span class="text-danger fw-semibold">⚠ 岗位月需 ' + roleTotal + ' 班，但 ' + holders +
+                   ' 人 × 每人最多 ' + maxWork + ' 班 = ' + cap + ' 班，排不开</span>';
+        } else if (op === '==' && target > 0 && avg < target) {
+            warn = ' <span class="text-danger fw-semibold">⚠ 每天恰好 ' + cnt + ' 人，' + holders + ' 人平均最多约 ' + avg +
+                   ' 班，达不到 ' + target + ' 班——建议改「至少」或豁免该岗位人员</span>';
         } else if (op === '==') {
-            if (target > 0 && avg < target) {
-                warn = ' <span class="text-danger fw-semibold">⚠ 每天恰好 ' + cnt + ' 人，' + holders + ' 人平均最多约 ' + avg +
-                       ' 班，达不到 ' + target + ' 班——建议改「至少」或豁免该岗位人员</span>';
-            } else {
-                warn = ' <span class="text-success">（每天恰好 ' + cnt + ' 人，人均 ' + avg + ' 班，可满足）</span>';
-            }
+            warn = ' <span class="text-success">（每天恰好 ' + cnt + ' 人，可满足）</span>';
         }
         html += '<div class="mb-1">· <b>' + role + '</b>：每天 ' + opLabel + ' ' + cnt + ' 人 × ' + DAYS + ' 天 = ' +
                 roleTotal + ' 个班，该岗位 ' + holders + ' 人' +
