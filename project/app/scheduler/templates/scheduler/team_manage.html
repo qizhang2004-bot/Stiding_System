@@ -450,7 +450,8 @@ function minWorkDays(days, rmax) {
 function liveCheck() {
     const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
     const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
-    const restMax = parseInt(document.querySelector('input[name="rest_max"]')?.value) || 4;
+    // 规则4：最大连休 = 10 - 至少应上班数//3（自动，不再手填）
+    const restMax = Math.max(2, 10 - Math.floor(target / 3));
     const elCap = document.getElementById('liveCapacity');
     const elRoles = document.getElementById('liveRoles');
     if (!elCap || !elRoles) return;
@@ -459,7 +460,8 @@ function liveCheck() {
     if (daily > 0 && target > 0) {
         const total = daily * DAYS;
         const mw = minWorkDays(DAYS, restMax);
-        const maxFill = Math.max(0, Math.min(TOTAL_PEOPLE, Math.floor((total - TOTAL_PEOPLE * mw) / (target - mw))));
+        // 规则1：最多能满 = floor(总班次/目标班数)；需豁免 = 总人数 - 最多能满
+        const maxFill = Math.min(TOTAL_PEOPLE, Math.floor(total / target));
         const need = Math.max(0, TOTAL_PEOPLE - maxFill);
         elCap.innerHTML = '总班次：每天 ' + daily + ' 人 × ' + DAYS + ' 天 = <b>' + total + '</b> 班；' +
             '连休规则限每人最少 <b>' + mw + '</b> 班 → 最多 <b>' + maxFill + '</b> 人能满 ' + target + ' 班' +

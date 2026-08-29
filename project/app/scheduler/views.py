@@ -560,8 +560,8 @@ def _run_generate(request, team: Team):
             shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
-            rest_block=dict(team.rest_block or {"min": 2, "max": 4}),
-            work_window=dict(DEFAULT_WORK_WINDOW), worker_snapshot=worker_snapshot,
+            rest_block={"min": 2, "max": rest_max},
+            work_window={"length": 10, "max_work": wmax}, worker_snapshot=worker_snapshot,
             status=result.status, message=result.message, diagnostics=result.diagnostics,
         )
         return redirect("scheduler:schedule_result", pk=record.id)
@@ -572,8 +572,8 @@ def _run_generate(request, team: Team):
         role_reqs=team.role_reqs or {},
         min_shift_target=team.min_shift_target,
         exempt_names=team.exempt_names or [],
-        rest_block=dict(team.rest_block or {"min": 2, "max": 4}),
-        work_window=dict(DEFAULT_WORK_WINDOW),
+        rest_block={"min": 2, "max": rest_max},
+        work_window={"length": 10, "max_work": wmax},
         worker_snapshot=worker_snapshot,
         status=result.status,
         message=result.message,
