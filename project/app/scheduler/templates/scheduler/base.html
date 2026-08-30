@@ -43,6 +43,15 @@
             color: #fff; box-shadow: 0 6px 16px rgba(106,156,245,.45);
         }
         .sidebar .nav-link .ico { font-size: 1.05rem; width: 20px; text-align: center; }
+        .sidebar .mobile-meta {
+            margin-top: 16px;
+            padding: 12px 8px 4px;
+            border-top: 1px dashed rgba(80,110,180,.3);
+            font-size: .8rem;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
         /* ---------- 内容区 ---------- */
         .content { margin-left: 232px; padding: 26px 30px 60px; }
         .page-title { font-weight: 800; color: #3a4a6b; margin-bottom: 18px; letter-spacing: .3px; }
@@ -86,6 +95,65 @@
         .text-muted-light { color: rgba(60,70,100,.65); }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-thumb { background: rgba(106,156,245,.4); border-radius: 8px; }
+
+        /* ================= 移动端响应式（手机/小屏 <768px） ================= */
+        @media (max-width: 767.98px) {
+            .sidebar {
+                position: static;           /* 不再固定左侧 */
+                width: 100%;
+                height: auto;
+                display: flex;
+                flex-direction: column;
+                padding: 10px 12px;
+                border-right: none;
+                border-bottom: 1px solid var(--glass-border);
+                box-shadow: 0 2px 12px rgba(80,110,180,.12);
+                overflow: visible;
+            }
+            .sidebar .brand {
+                font-size: 1rem;
+                padding: 2px 4px 8px;
+                margin-bottom: 8px;
+            }
+            /* 导航项横向排列，可左右滑动 */
+            .nav-row {
+                display: flex;
+                gap: 6px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 2px;
+            }
+            .sidebar .nav-link {
+                flex: 0 0 auto;
+                padding: 8px 14px;
+                font-size: .86rem;
+                margin-bottom: 0;
+                white-space: nowrap;
+                border-radius: 10px;
+            }
+            .sidebar .nav-link:hover { transform: none; }
+            /* 统计与用户信息在手机上收成一行，紧凑显示 */
+            .sidebar .mobile-meta {
+                display: flex;
+                flex-direction: row;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 6px 12px;
+                justify-content: space-between;
+                font-size: .78rem;
+                margin-top: 8px;
+                padding: 6px 2px 0;
+                border-top: 1px dashed rgba(80,110,180,.25);
+            }
+            .content { margin-left: 0; padding: 14px 12px 50px; }
+            .page-title { font-size: 1.2rem; margin-bottom: 12px; }
+            .glass-card { padding: 14px; border-radius: 14px; }
+            .table { font-size: .85rem; }
+            .table thead th, .table td { white-space: nowrap; }
+            h4 { font-size: 1.15rem; }
+            .fs-3 { font-size: 1.3rem !important; }
+            .fs-4 { font-size: 1.15rem !important; }
+        }
     </style>
 </head>
 <body>
@@ -95,6 +163,7 @@
     {% url 'scheduler:team_manage' as u_teams %}
     {% url 'scheduler:shift_board' as u_board %}
     {% url 'scheduler:schedule_list' as u_list %}
+    <div class="nav-row">
     <a class="nav-link {% if request.path == u_index %}active{% endif %}" href="{{ u_index }}">
         <span class="ico">🏠</span>首页
     </a>
@@ -107,24 +176,18 @@
     <a class="nav-link {% if request.path == u_list %}active{% endif %}" href="{{ u_list }}">
         <span class="ico">📋</span>排班记录
     </a>
-    <div class="mt-4 px-3 text-muted-light" style="font-size:.8rem;">
-        人员 {{ person_count|default:"—" }} 人 · 班组 {{ team_count|default:"—" }} 个
     </div>
-    <div class="mt-4 px-2" style="border-top:1px dashed rgba(80,110,180,.3); padding-top:12px;">
+    <div class="mobile-meta">
+        <span class="text-muted-light">人员 {{ person_count|default:"—" }} 人 · 班组 {{ team_count|default:"—" }} 个</span>
         {% if request.user.is_authenticated %}
-        <div class="small text-muted-light mb-2">
-            <div class="fw-bold text-dark">{{ request.user.username }}
-                {% with profile=request.user.profile %}
-                <span class="badge {% if profile.role == 'super' %}text-bg-danger{% elif profile.role == 'team_admin' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ profile.role_label|default:"队员" }}</span>
-                {% endwith %}
-            </div>
+        <span>
+            {{ request.user.username }}
             {% with profile=request.user.profile %}
-            <div>队组：{{ profile.group.name|default:"全部（超级管理员）" }}</div>
+            <span class="badge {% if profile.role == 'super' %}text-bg-danger{% elif profile.role == 'team_admin' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ profile.role_label|default:"队员" }}</span>
+            · {{ profile.group.name|default:"全部" }}
             {% endwith %}
-        </div>
-        <a class="btn btn-sm btn-outline-danger w-100" href="{% url 'scheduler:logout' %}">退出登录</a>
-        {% else %}
-        <a class="btn btn-sm btn-primary w-100" href="{% url 'scheduler:login' %}">登 录</a>
+            <a class="btn btn-sm btn-outline-danger ms-2 py-0" href="{% url 'scheduler:logout' %}">退出</a>
+        </span>
         {% endif %}
     </div>
 </aside>
