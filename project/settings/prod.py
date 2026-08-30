@@ -119,3 +119,16 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # 登录配置
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
+
+# 日志：把错误输出到 stderr（gunicorn 会捕获到 journalctl），便于排查线上 500
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'root': {'handlers': ['console'], 'level': 'ERROR'},
+    'loggers': {
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+    },
+}

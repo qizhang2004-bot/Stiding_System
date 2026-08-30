@@ -240,6 +240,33 @@ def _parse_import_text(text: str):
     return items
 
 
+def _rows_from_excel(raw_bytes):
+    """从 Excel（.xlsx/.xls）二进制解析出人员文本行（每行单元格用 - 连接）。"""
+    from io import BytesIO
+    import openpyxl
+    wb = openpyxl.load_workbook(BytesIO(raw_bytes), read_only=True, data_only=True)
+    ws = wb.active
+    lines = []
+    for row in ws.iter_rows(values_only=True):
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        cells = [c for c in cells if c]
+        if cells:
+            lines.append("-".join(cells))
+    return lines
+
+
+def _rows_from_csv(text):
+    """从 CSV 文本解析出人员文本行（每行单元格用 - 连接）。"""
+    import csv
+    import io
+    lines = []
+    for row in csv.reader(io.StringIO(text)):
+        cells = [c.strip() for c in row if c.strip()]
+        if cells:
+            lines.append("-".join(cells))
+    return lines
+
+
 @require_http_methods(["GET", "POST"])
 @login_required
 def team_manage(request):
@@ -315,35 +342,59 @@ def team_manage(request):
         if action == "import":
             text = request.POST.get("import_text", "")
             uploaded = request.FILES.get("import_file")
+            parse_error = ""
             if uploaded:
-                text = uploaded.read().decode("utf-8-sig", errors="ignore")
+                fname = (uploaded.name or "").lower()
+                raw = uploaded.read()
+                try:
+                    if fname.endswith((".xlsx", ".xls", ".xlsm")):
+                        # Excel：按单元格读，每行拼成「班组-姓名-岗位-已上-应上-班次」
+                        text = "\n".join(_rows_from_excel(raw))
+                    elif fname.endswith(".csv"):
+                        # CSV：按逗号分列，每行拼成同样格式
+                        csv_text = raw.decode("utf-8-sig", errors="ignore")
+                        text = "\n".join(_rows_from_csv(csv_text))
+                    else:
+                        # 纯文本（txt / 粘贴）
+                        text = raw.decode("utf-8-sig", errors="ignore")
+                except Exception as e:  # noqa: BLE001
+                    parse_error = f"文件解析失败：{e}"
+                    text = ""
             parsed = _parse_import_text(text)
-            if not parsed:
+            if parse_error:
+                error = parse_error
+            elif not parsed:
                 error = "没有解析到任何人员，请检查导入格式。"
             else:
                 created_p = 0
+                row_errors = []
                 for team, nm, roles, worked, required, default_shift in parsed:
-                    person, is_new = Person.objects.get_or_create(name=nm)
-                    if is_new:
-                        created_p += 1
-                    # 归属班组：队组账号只能导入到本队组下的班组
-                    if ug:
-                        tname = team or "检修班"
-                        person.team, _ = Team.objects.get_or_create(group=ug, name=tname)
-                    elif team:
-                        person.team, _ = Team.objects.get_or_create(name=team)
-                    person.worked_so_far = worked
-                    person.required_shifts = required
-                    # 默认班次：显式写了就用；没写保持默认「早班」（可在人员编辑页修改）
-                    if default_shift:
-                        person.default_shift = default_shift
-                    person.save()
-                    for rn in roles:
-                        role, _ = Role.objects.get_or_create(name=rn)
-                        person.roles.add(role)
+                    try:
+                        person, is_new = Person.objects.get_or_create(name=nm)
+                        if is_new:
+                            created_p += 1
+                        # 归属班组：队组账号只能导入到本队组下的班组
+                        if ug:
+                            tname = team or "检修班"
+                            person.team, _ = Team.objects.get_or_create(group=ug, name=tname)
+                        elif team:
+                            person.team, _ = Team.objects.get_or_create(name=team)
+                        person.worked_so_far = worked
+                        person.required_shifts = required
+                        # 默认班次：显式写了就用；没写保持默认「早班」
+                        if default_shift:
+                            person.default_shift = default_shift
+                        person.save()
+                        for rn in roles:
+                            role, _ = Role.objects.get_or_create(name=rn)
+                            person.roles.add(role)
+                    except Exception as e:  # noqa: BLE001 —— 单行出错不中断整体导入
+                        row_errors.append(f"{nm}: {e}")
                 message = (f"导入完成：新增人员 {created_p} 人"
                            f"{'（已归入本队组「' + ug.name + '」的班组）' if ug else ''}"
                            f"，共处理 {len(parsed)} 条记录。")
+                if row_errors:
+                    error = "部分人员导入失败：" + "；".join(row_errors[:5])
 
         elif action == "delete":
             pid = request.POST.get("person_id")
