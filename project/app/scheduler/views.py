@@ -373,12 +373,13 @@ def team_manage(request):
                         person, is_new = Person.objects.get_or_create(name=nm)
                         if is_new:
                             created_p += 1
-                        # 归属班组：队组账号只能导入到本队组下的班组
-                        if ug:
+                        # 归属班组：队组账号归自己队组；超管用 URL 指定的队组；都没有才按名称匹配第一个
+                        target_group = ug or selected_group
+                        if target_group:
                             tname = team or "检修班"
-                            person.team, _ = Team.objects.get_or_create(group=ug, name=tname)
+                            person.team, _ = Team.objects.get_or_create(group=target_group, name=tname)
                         elif team:
-                            person.team, _ = Team.objects.get_or_create(name=team)
+                            person.team = Team.objects.filter(name=team).first()
                         person.worked_so_far = worked
                         person.required_shifts = required
                         # 默认班次：显式写了就用；没写保持默认「早班」
