@@ -482,6 +482,19 @@ def build_schedule(
                 for start in range(days - rmax):
                     m.add(sum(r[w, d] for d in range(start, start + rmax + 1)) <= rmax)
 
+        # 约束 5b：连续上班至少 2 天（禁止「休-上-休」，含月初/月末边界）
+        # 豁免人员不受此约束
+        for w in range(len(names)):
+            if names[w] in exempt:
+                continue
+            for d in range(1, days - 1):
+                m.add(r[w, d - 1] + y[w, d] + r[w, d + 1] <= 2)
+            if days >= 2:
+                # 月初：禁止「第1天上班、第2天就休息」（连续上班只有1天）
+                m.add(y[w, 0] + r[w, 1] <= 1)
+                # 月末：禁止「最后1天才上班」（连续上班只有1天）
+                m.add(r[w, days - 2] + y[w, days - 1] <= 1)
+
         # 每人班次要求
         count_v: Dict[str, Any] = {}
         over_dev: Dict[str, Any] = {}
@@ -658,7 +671,16 @@ def build_schedule(
                 m2.add_hint(t2["y"][w, d], int(sol1.value(t1["y"][w, d])))
                 for s in shifts:
                     m2.add_hint(t2["x"][w, d, s], int(sol1.value(t1["x"][w, d, s])))
-        obj = sum(t2["over_dev"][nm] + t2["under_dev"][nm] for nm in t2["over_dev"]) * w_tgt
+        obj = 0
+        # 均衡：最小化非豁免人员的「最大班数 - 最小班数」，
+        # 让「每天人数×天数」多出来的班次均衡分配给非豁免人员（而非集中在个别人/豁免）
+        non_exempt_counts = [t2["count_v"][nm] for nm in names if nm not in exempt]
+        if len(non_exempt_counts) >= 2:
+            max_c = m2.new_int_var(0, days, "max_c")
+            min_c = m2.new_int_var(0, days, "min_c")
+            m2.add_max_equality(max_c, non_exempt_counts)
+            m2.add_min_equality(min_c, non_exempt_counts)
+            obj += (max_c - min_c) * w_tgt
         obj += sum(t2["single_rest_vars"]) * w_sr
         obj += sum(t2["shift_mismatch_vars"]) * weights.get("shift_mismatch", 1)
         # 豁免人员尽量少且均衡：最小化其最大班数（剩余班数均匀分割）

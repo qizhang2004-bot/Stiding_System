@@ -608,7 +608,7 @@ def _run_generate(request, team: Team):
         "work_window": {"length": 10, "max_work": wmax},
     }
 
-    def _build_req(hard: bool):
+    def _build_req():
         req = {}
         for p in persons:
             # 规则3：全局「至少应上班数」优先；未填时才用每人「应上班数」
@@ -620,25 +620,14 @@ def _run_generate(request, team: Team):
                 tgt = 0
             if tgt <= 0 or p.name in exempt_set:
                 continue
-            if hard:
-                # 非豁免恰好达到目标（不超排），剩余班数交由豁免人员分割
-                req[p.name] = {"target": tgt, "min": tgt, "max": tgt}
-            else:
-                req[p.name] = {"target": tgt}
+            # 最低班次是硬约束（>= tgt），不设上限：允许超过 tgt，
+            # 剩余班次（每天人数×天数 - 各人最低班次）由求解器均衡分配给人员
+            req[p.name] = {"target": tgt, "min": tgt}
         return req
 
     config = dict(base_config)
-    config["worker_shift_req"] = _build_req(hard_targets)
+    config["worker_shift_req"] = _build_req()
     result = build_schedule(config, time_limit_seconds=30, phase2_seconds=10)
-    if not result.feasible and hard_targets:
-        # 岗位条件等导致硬达标不可行：回退到软性目标（最大化达标人数）
-        config = dict(base_config)
-        config["worker_shift_req"] = _build_req(hard=False)
-        result = build_schedule(config, time_limit_seconds=30, phase2_seconds=10)
-        result.diagnostics = list(result.diagnostics) + [
-            "提示：岗位人数条件（如 电工 每天恰好 N 人）导致部分岗位人员无法全员达到应上班数，"
-            "已按「最大化达标人数」处理，下方列出未达标人员。可把岗位条件从「等于」改为「至少」，或豁免这些人员。"
-        ]
 
     if not result.feasible:
         # 整体无解：创建记录保存诊断信息（无排班明细）
