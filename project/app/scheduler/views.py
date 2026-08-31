@@ -609,6 +609,7 @@ def _run_generate(request, team: Team):
 
     def _build_req():
         req = {}
+        has_exempt = bool(exempt_set)
         for p in persons:
             # 规则3：全局「至少应上班数」优先；未填时才用每人「应上班数」
             if target_global > 0:
@@ -619,9 +620,13 @@ def _run_generate(request, team: Team):
                 tgt = 0
             if tgt <= 0 or p.name in exempt_set:
                 continue
-            # 最低班次是硬约束（>= tgt），不设上限：允许超过 tgt，
-            # 剩余班次（每天人数×天数 - 各人最低班次）由求解器均衡分配给人员
-            req[p.name] = {"target": tgt, "min": tgt}
+            if has_exempt:
+                # 有豁免人员：非豁免恰好上满 tgt，剩余班次交给豁免人员平分
+                req[p.name] = {"target": tgt, "min": tgt, "max": tgt}
+            else:
+                # 无豁免人员：非豁免最低 tgt（硬下限、不设上限），
+                # 多出来的班次由求解器均衡分配给这些人
+                req[p.name] = {"target": tgt, "min": tgt}
         return req
 
     config = dict(base_config)

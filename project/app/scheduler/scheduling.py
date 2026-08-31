@@ -671,23 +671,27 @@ def build_schedule(
                 m2.add_hint(t2["y"][w, d], int(sol1.value(t1["y"][w, d])))
                 for s in shifts:
                     m2.add_hint(t2["x"][w, d, s], int(sol1.value(t1["x"][w, d, s])))
-        obj = 0
-        # 均衡：最小化非豁免人员的「最大班数 - 最小班数」，
-        # 让「每天人数×天数」多出来的班次均衡分配给非豁免人员（而非集中在个别人/豁免）
+        # 非豁免尽量贴近目标班数（超 target 有惩罚，避免无谓超排）；
+        # 剩余班次自然落到豁免人员头上，再由「豁免尽量少且均衡」兜底
+        obj = sum(t2["over_dev"][nm] + t2["under_dev"][nm] for nm in t2["over_dev"]) * w_tgt
+        # 均衡：非豁免班数尽量均匀（max-min 最小），让多出来的班次分摊到多人头上
         non_exempt_counts = [t2["count_v"][nm] for nm in names if nm not in exempt]
         if len(non_exempt_counts) >= 2:
             max_c = m2.new_int_var(0, days, "max_c")
             min_c = m2.new_int_var(0, days, "min_c")
             m2.add_max_equality(max_c, non_exempt_counts)
             m2.add_min_equality(min_c, non_exempt_counts)
-            obj += (max_c - min_c) * w_tgt
+            obj += (max_c - min_c) * weights.get("balance", 10)
         obj += sum(t2["single_rest_vars"]) * w_sr
         obj += sum(t2["shift_mismatch_vars"]) * weights.get("shift_mismatch", 1)
-        # 豁免人员尽量少且均衡：最小化其最大班数（剩余班数均匀分割）
+        # 豁免人员尽量少且均匀：最小化最大班数 + 最小化「最大-最小」差值
         if t2["exempt_count_vars"]:
             exempt_max = m2.new_int_var(0, days, "exempt_max")
+            exempt_min = m2.new_int_var(0, days, "exempt_min")
             m2.add_max_equality(exempt_max, t2["exempt_count_vars"])
+            m2.add_min_equality(exempt_min, t2["exempt_count_vars"])
             obj += exempt_max * weights.get("exempt_balance", 5)
+            obj += (exempt_max - exempt_min) * weights.get("exempt_spread", 3)
         m2.minimize(obj)
         sol2, st2 = _solve(m2, phase2_seconds)
         if st2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
