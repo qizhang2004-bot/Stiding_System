@@ -1,8 +1,10 @@
+from datetime import date
+
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Group, Person, Role, Team, UserProfile
+from .models import Assignment, Group, Person, Role, Schedule, Team, UserProfile
 
 
 class ViewSafetyTests(TestCase):
@@ -34,6 +36,28 @@ class ViewSafetyTests(TestCase):
     def test_shift_detail_bad_month_redirects(self):
         resp = self.client.get(reverse("scheduler:shift_detail", args=[2025, 13, 0, "早班"]))
         self.assertEqual(resp.status_code, 302)
+
+    def test_shift_detail_button_label_by_role(self):
+        # 构造一份排班明细，让某天某班次有人员
+        sch = Schedule.objects.create(
+            team=self.team_a, year=2025, month=5, start_date=date(2025, 4, 25), days=30,
+            shifts=["早班", "中班", "晚班"],
+        )
+        Assignment.objects.create(schedule=sch, person=self.person_a, day=0, shift="早班")
+        url = reverse("scheduler:shift_detail", args=[2025, 5, 0, "早班"])
+
+        # 队组管理员：显示「改班」
+        resp = self.client.get(url)
+        self.assertIn("改班", resp.content.decode())
+
+        # 队员（只读）：显示「查看」，不出现「改班」
+        member = User.objects.create_user("member_b", password="pw")
+        UserProfile.objects.create(user=member, group=self.group_a, role="member")
+        self.client.force_login(member)
+        resp2 = self.client.get(url)
+        content2 = resp2.content.decode()
+        self.assertIn("查看", content2)
+        self.assertNotIn("改班", content2)
 
     def test_save_constraints_bad_team_id_no_500(self):
         resp = self.client.post(reverse("scheduler:team_manage"), {

@@ -1001,6 +1001,7 @@ def shift_detail(request, year, month, day, shift):
         "date": ddate,
         "groups": groups,
         "selected_group": selected_group,
+        "is_member": user_role(request) == "member",
     })
 
 

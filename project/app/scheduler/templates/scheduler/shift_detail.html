@@ -34,7 +34,7 @@
                     <td class="text-center fw-bold">{{ e.worked }}</td>
                     <td class="text-center fw-semibold">{{ e.required }}</td>
                     <td class="text-center">
-                        <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' e.person.id %}?y={{ year }}&m={{ month }}">改班</a>
+                        <a class="btn btn-sm btn-outline-primary" href="{% url 'scheduler:person_detail' e.person.id %}?y={{ year }}&m={{ month }}">{% if is_member %}查看{% else %}改班{% endif %}</a>
                     </td>
                     {% else %}
                     <td class="fw-bold text-muted-light">{{ e.person_name|default:"" }}</td>
@@ -48,7 +48,11 @@
 </div>
 {% endfor %}
 <div class="text-muted-light small">
+    {% if is_member %}
+    点击姓名或「查看」跳转到个人日历，查看该人员的排班详情。
+    {% else %}
     点击姓名或「改班」跳转到个人日历，可修改该人员的排班，修改会同步到班次展示与结果页。
+    {% endif %}
 </div>
 {% else %}
 <div class="glass-card text-center py-5 text-muted-light">
