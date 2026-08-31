@@ -156,13 +156,13 @@ def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4,
                    target: int = 18) -> dict:
     """快速容量参数（纯计算、不求解）：total / min_work / max_work。
 
-    max_work 由工作窗口决定：任意 10 天最多上 target//3 班（规则4）。
+    已去掉「10 天最多 6 班」工作窗口，每人最多能上 days 天（无密度上限），
+    休息天数由「每天应上人数」自然决定：人多则少休、人少则多休。
     """
-    wmax = max(1, target // 3) if target > 0 else 6
     return {
         "total": daily * days,
         "min_work": _min_work_days(days, rest_max),
-        "max_work": _max_work_in_month(days, 10, wmax),
+        "max_work": days,
     }
 
 

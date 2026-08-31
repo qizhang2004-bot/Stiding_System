@@ -582,9 +582,9 @@ def _run_generate(request, team: Team):
     else:
         reqs = [p.required_shifts for p in persons if p.required_shifts > 0]
         cap_target = (sum(reqs) // len(reqs)) if reqs else 18
-    # 规则4：工作窗口动态 = 10 天最多上 cap_target//3 班；连休 2 ~ (10 - cap_target//3) 天
-    wmax = max(1, cap_target // 3) if cap_target > 0 else 6
-    rest_max = max(2, 10 - wmax)
+    # 规则4：连休 2 ~ (10 - 至少应上班数//3) 天（已去掉「10天最多6班」工作窗口，
+    # 休息天数由每天应上人数自然决定：人多则少休、人少则多休）
+    rest_max = max(2, 10 - (cap_target // 3)) if cap_target > 0 else 4
 
     # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
     non_exempt_count = len([p for p in persons if p.name not in exempt_set])
@@ -605,7 +605,6 @@ def _run_generate(request, team: Team):
         "worker_default_shift": default_shift_map,
         "exempt_workers": team.exempt_names or [],
         "rest_block": {"min": 2, "max": rest_max},
-        "work_window": {"length": 10, "max_work": wmax},
     }
 
     def _build_req():
@@ -637,7 +636,7 @@ def _run_generate(request, team: Team):
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
             rest_block={"min": 2, "max": rest_max},
-            work_window={"length": 10, "max_work": wmax}, worker_snapshot=worker_snapshot,
+            work_window={}, worker_snapshot=worker_snapshot,
             status=result.status, message=result.message, diagnostics=result.diagnostics,
         )
         return redirect("scheduler:schedule_result", pk=record.id)
@@ -649,7 +648,7 @@ def _run_generate(request, team: Team):
         min_shift_target=team.min_shift_target,
         exempt_names=team.exempt_names or [],
         rest_block={"min": 2, "max": rest_max},
-        work_window={"length": 10, "max_work": wmax},
+        work_window={},
         worker_snapshot=worker_snapshot,
         status=result.status,
         message=result.message,
