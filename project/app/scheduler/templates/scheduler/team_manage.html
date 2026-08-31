@@ -108,33 +108,11 @@
         <input type="hidden" name="action" value="save_constraints">
         <input type="hidden" name="team_id" value="{{ team.id }}">
 
-        <!-- 班次切换：早班 / 中班 / 晚班 -->
-        <div class="d-flex align-items-center flex-wrap gap-2 mb-3 p-2 rounded" style="background:rgba(255,255,255,.55);">
-            <span class="text-muted-light small fw-semibold">班次：</span>
-            <button type="button" class="btn btn-sm shift-tab btn-primary" data-shift="早班">早班</button>
-            <button type="button" class="btn btn-sm shift-tab btn-outline-primary" data-shift="中班">中班</button>
-            <button type="button" class="btn btn-sm shift-tab btn-outline-primary" data-shift="晚班">晚班</button>
-            <span class="text-muted-light small ms-1">切换后显示对应班次的人与「每天应上人数」</span>
-        </div>
-
-        <!-- 每个班次的每天应上人数（随班次切换显示） -->
-        <div class="shift-panel mb-3" data-shift="早班">
-            <label class="form-label fw-semibold">「早班」每天应上人数</label>
-            <input type="number" name="shift_早班" class="form-control" min="0" style="max-width:220px;" value="{{ team.shift_demand.早班|default:'' }}" placeholder="0">
-            <div class="form-text">留空表示该班次不排人</div>
-        </div>
-        <div class="shift-panel mb-3" data-shift="中班" style="display:none">
-            <label class="form-label fw-semibold">「中班」每天应上人数</label>
-            <input type="number" name="shift_中班" class="form-control" min="0" style="max-width:220px;" value="{{ team.shift_demand.中班|default:'' }}" placeholder="0">
-            <div class="form-text">留空表示该班次不排人</div>
-        </div>
-        <div class="shift-panel mb-3" data-shift="晚班" style="display:none">
-            <label class="form-label fw-semibold">「晚班」每天应上人数</label>
-            <input type="number" name="shift_晚班" class="form-control" min="0" style="max-width:220px;" value="{{ team.shift_demand.晚班|default:'' }}" placeholder="0">
-            <div class="form-text">留空表示该班次不排人</div>
-        </div>
-
         <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label class="form-label fw-semibold">1.1 该班应上人数（每天）</label>
+                <input type="number" name="daily_headcount" class="form-control" min="0" value="{{ team.daily_headcount }}">
+            </div>
             <div class="col-md-4">
                 <label class="form-label fw-semibold">1.3 连休范围（天）</label>
                 <div class="input-group">
@@ -312,7 +290,7 @@
             </thead>
             <tbody>
             {% for p, worked in rows %}
-                <tr data-roles="{% for r in p.roles.all %}{{ r.name }}{% if not forloop.last %},{% endif %}{% endfor %}" data-shift="{{ p.default_shift }}">
+                <tr data-roles="{% for r in p.roles.all %}{{ r.name }}{% if not forloop.last %},{% endif %}{% endfor %}">
                     <td><input type="checkbox" class="personCheck" name="person_ids" value="{{ p.id }}" form="batchShiftForm"></td>
                     <td class="fw-bold">{{ p.name }}
                         {% if not p.is_active %}<span class="badge text-bg-secondary ms-1" style="border-radius:8px;">已禁用</span>{% endif %}
@@ -389,48 +367,29 @@
 {% block scripts %}
 {{ role_holder_counts|json_script:"holdersData" }}
 <script>
-// ---- 班次切换 + 按岗位筛选 ----
-let currentShift = '早班';
+// ---- 按岗位筛选（可多选） ----
 const filterAll = document.getElementById('filterAll');
 const roleFilters = [...document.querySelectorAll('.role-filter[data-role]')];
-
-function applyFilters() {
+function applyRoleFilter() {
     const selected = roleFilters.filter(c => c.checked).map(c => c.dataset.role);
     const showAll = filterAll.checked || selected.length === 0;
     let shown = 0;
     document.querySelectorAll('#teamPeople tbody tr').forEach(tr => {
         const roles = (tr.dataset.roles || '').split(',');
-        const matchRole = showAll || selected.some(r => roles.includes(r));
-        const matchShift = tr.dataset.shift === currentShift;
-        const match = matchRole && matchShift;
+        const match = showAll || selected.some(r => roles.includes(r));
         tr.style.display = match ? '' : 'none';
         if (match) shown++;
     });
     const cnt = document.getElementById('peopleCount');
-    if (cnt) cnt.textContent = '「' + currentShift + '」 ' + shown + ' 人';
+    if (cnt) cnt.textContent = shown + ' 人' + (showAll || selected.length === 0 ? '' : '（已按岗位筛选）');
 }
-
-function switchShift(shift) {
-    currentShift = shift;
-    document.querySelectorAll('.shift-tab').forEach(b => {
-        b.classList.toggle('btn-primary', b.dataset.shift === shift);
-        b.classList.toggle('btn-outline-primary', b.dataset.shift !== shift);
-    });
-    document.querySelectorAll('.shift-panel').forEach(p => {
-        p.style.display = p.dataset.shift === shift ? '' : 'none';
-    });
-    applyFilters();
-    liveCheck();
-}
-document.querySelectorAll('.shift-tab').forEach(b => b.addEventListener('click', () => switchShift(b.dataset.shift)));
-
 filterAll?.addEventListener('change', function () {
     if (this.checked) roleFilters.forEach(c => { c.checked = false; });
-    applyFilters();
+    applyRoleFilter();
 });
 roleFilters.forEach(c => c.addEventListener('change', function () {
     if (this.checked) filterAll.checked = false;
-    applyFilters();
+    applyRoleFilter();
 }));
 
 // 删除班组确认：必须输入「删除」两个字才能点确认
@@ -497,32 +456,26 @@ function maxWorkDays(days, wmax) {
     return Math.min(days, full * wmax + Math.min(wmax, rem));
 }
 function liveCheck() {
-    // 当前班次的每天应上人数
-    const daily = parseInt(document.querySelector('input[name="shift_' + currentShift + '"]')?.value) || 0;
+    const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
     const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
     // 规则4：最大连休 = 10 - 至少应上班数//3（自动，不再手填）
     const restMax = Math.max(2, 10 - Math.floor(target / 3));
-    // 当前班次的人员数（默认班次 == 当前班次）
-    let shiftPeople = 0;
-    document.querySelectorAll('#teamPeople tbody tr').forEach(tr => {
-        if (tr.dataset.shift === currentShift) shiftPeople++;
-    });
     const elCap = document.getElementById('liveCapacity');
     const elRoles = document.getElementById('liveRoles');
     if (!elCap || !elRoles) return;
 
-    // 当前班次的容量
+    // 总容量
     if (daily > 0 && target > 0) {
         const total = daily * DAYS;
         const mw = minWorkDays(DAYS, restMax);
-        // 规则1：最多能满 = floor(总班次/目标班数)；需豁免 = 该班次人数 - 最多能满
-        const maxFill = Math.min(shiftPeople, Math.floor(total / target));
-        const need = Math.max(0, shiftPeople - maxFill);
-        elCap.innerHTML = '「' + currentShift + '」：每天 ' + daily + ' 人 × ' + DAYS + ' 天 = <b>' + total + '</b> 班；' +
+        // 规则1：最多能满 = floor(总班次/目标班数)；需豁免 = 总人数 - 最多能满
+        const maxFill = Math.min(TOTAL_PEOPLE, Math.floor(total / target));
+        const need = Math.max(0, TOTAL_PEOPLE - maxFill);
+        elCap.innerHTML = '总班次：每天 ' + daily + ' 人 × ' + DAYS + ' 天 = <b>' + total + '</b> 班；' +
             '连休规则限每人最少 <b>' + mw + '</b> 班 → 最多 <b>' + maxFill + '</b> 人能满 ' + target + ' 班' +
-            (need > 0 ? '；<span class="text-danger fw-semibold">需豁免 ' + need + ' 人</span>' : '；<span class="text-success">该班次全员可满</span>') + '。';
+            (need > 0 ? '；<span class="text-danger fw-semibold">需豁免 ' + need + ' 人</span>' : '；<span class="text-success">全员可满</span>') + '。';
     } else {
-        elCap.innerHTML = '请填写「' + currentShift + '」每天应上人数和「每人应上最少班数」。';
+        elCap.innerHTML = '请填写「每天应上人数」和「每人应上最少班数」。';
     }
 
     // 每个岗位
@@ -558,14 +511,12 @@ function liveCheck() {
     });
     elRoles.innerHTML = html || '<div class="text-muted-light">暂无岗位条件。</div>';
 }
-// 绑定实时监听（三个班次的人数 + 最少班数）
-['shift_早班', 'shift_中班', 'shift_晚班', 'min_shift_target'].forEach(n => {
+// 绑定实时监听
+['daily_headcount', 'min_shift_target', 'rest_max'].forEach(n => {
     document.querySelector('input[name="' + n + '"]')?.addEventListener('input', liveCheck);
 });
 document.getElementById('roleRows')?.addEventListener('change', liveCheck);
 document.getElementById('roleRows')?.addEventListener('input', liveCheck);
-// 初始按「早班」筛选并自检
-applyFilters();
 liveCheck();
 </script>
 {% endblock %}

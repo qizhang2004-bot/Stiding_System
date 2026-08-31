@@ -325,16 +325,6 @@ def team_manage(request):
                     team.daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
                 except ValueError:
                     pass
-                # 每班每天人数（早班/中班/晚班），填了的班次才生效
-                shift_demand = {}
-                for s in FIXED_SHIFTS:
-                    try:
-                        v = int(request.POST.get(f"shift_{s}") or 0)
-                    except ValueError:
-                        v = 0
-                    if v > 0:
-                        shift_demand[s] = v
-                team.shift_demand = shift_demand
                 role_names = request.POST.getlist("role_names")
                 role_ops = request.POST.getlist("role_ops")
                 role_counts = request.POST.getlist("role_counts")
@@ -565,9 +555,7 @@ def team_manage(request):
 
 def _run_generate(request, team: Team):
     """用班组存储的约束调用引擎生成排班，返回重定向到结果页。"""
-    # 每班每天人数（早/中/晚），填了才生效；优先于每天总人数
-    shift_demand = {k: v for k, v in (team.shift_demand or {}).items() if v}
-    if not (team.daily_headcount and team.daily_headcount > 0) and not shift_demand:
+    if not team.daily_headcount or team.daily_headcount <= 0:
         from urllib.parse import quote
         return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}&error=daily")
     y, m = current_period()
@@ -600,9 +588,8 @@ def _run_generate(request, team: Team):
 
     # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
     non_exempt_count = len([p for p in persons if p.name not in exempt_set])
-    daily_total_cap = sum(shift_demand.values()) if shift_demand else (team.daily_headcount or 0)
     cap = capacity_analysis(
-        len(persons), daily_total_cap, days,
+        len(persons), team.daily_headcount or 0, days,
         rest_max, cap_target,
         exempt_count=len(persons) - non_exempt_count,
     )
@@ -612,9 +599,7 @@ def _run_generate(request, team: Team):
         "workers": worker_snapshot,
         "shifts": FIXED_SHIFTS,
         "days": days,
-        # 有每班人数时用每班精确人数，否则用每天总人数
-        "daily_total": (team.daily_headcount or None) if not shift_demand else None,
-        "shift_demand": shift_demand,
+        "daily_total": team.daily_headcount or 0,
         "role_req": team.role_reqs or {},
         "min_shift_target": team.min_shift_target or None,
         "worker_default_shift": default_shift_map,
@@ -659,7 +644,7 @@ def _run_generate(request, team: Team):
         # 整体无解：创建记录保存诊断信息（无排班明细）
         record = Schedule.objects.create(
             team=team, year=y, month=m, start_date=start, days=days,
-            shifts=FIXED_SHIFTS, shift_demand=shift_demand, daily_total=daily_total_cap,
+            shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
             rest_block={"min": 2, "max": rest_max},
