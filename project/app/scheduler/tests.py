@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Group, Person, Team, UserProfile
+from .models import Group, Person, Role, Team, UserProfile
 
 
 class ViewSafetyTests(TestCase):
@@ -56,6 +56,18 @@ class ViewSafetyTests(TestCase):
             "action": "delete", "person_id": str(self.person_a.id),
         })
         self.assertTrue(Person.objects.filter(id=self.person_a.id).exists())
+
+    def test_person_edit_roles_scoped_to_group(self):
+        # 人员编辑页的岗位只显示本队组的岗位，其它队组的岗位不应出现
+        role_own = Role.objects.create(name="本队岗位")
+        role_other = Role.objects.create(name="他队岗位")
+        self.person_a.roles.add(role_own)
+        self.person_b.roles.add(role_other)
+        resp = self.client.get(reverse("scheduler:person_edit", args=[self.person_a.id]))
+        self.assertEqual(resp.status_code, 200)
+        content = resp.content.decode()
+        self.assertIn("本队岗位", content)
+        self.assertNotIn("他队岗位", content)
 
     def test_cannot_move_person_to_other_group_team(self):
         resp = self.client.post(

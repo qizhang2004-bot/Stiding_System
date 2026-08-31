@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
@@ -763,10 +764,20 @@ def person_edit(request, person_id):
             pass
         person.save()
         message = f"已保存「{person.name}」的信息。"
+    # 岗位只显示「该人员所属队组」里出现过的岗位（并保留本人已有岗位），
+    # 避免把全系统其它队组/导入误产生的无关岗位（乱码、人名等）列出来
+    scope_group = person.team.group if person.team else ug
+    if scope_group:
+        all_roles = Role.objects.filter(
+            Q(persons__team__group=scope_group) | Q(persons=person)
+        ).distinct().order_by("name")
+    else:
+        all_roles = person.roles.all().order_by("name")
+
     return render(request, "scheduler/person_edit.html", {
         "person": person,
-        "all_roles": Role.objects.order_by("name"),
-        "teams": Team.objects.filter(group=user_group(request)) if user_group(request) else Team.objects.order_by("name"),
+        "all_roles": all_roles,
+        "teams": Team.objects.filter(group=ug) if ug else Team.objects.order_by("name"),
         "message": message,
     })
 
