@@ -544,6 +544,7 @@ def team_manage(request):
         "user_group": ug,
         "groups": groups,
         "selected_group": selected_group,
+        "shifts": FIXED_SHIFTS,
         "rows": rows,
         "team_persons": [p for p, _ in rows],
         "active_person_count": active_person_count,
