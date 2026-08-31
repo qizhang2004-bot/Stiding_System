@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_http_methods
 
 from .models import Assignment, Group, Person, Role, Schedule, Team, UserProfile
@@ -35,6 +36,11 @@ def login_view(request):
         if user is not None:
             auth_login(request, user)
             next_url = request.POST.get("next") or request.GET.get("next") or "/"
+            if not url_has_allowed_host_and_scheme(
+                next_url, allowed_hosts={request.get_host()},
+                require_https=request.is_secure(),
+            ):
+                next_url = "/"
             return redirect(next_url)
         error = "账号或密码错误，请重试。"
     return render(request, "scheduler/login.html", {
@@ -105,6 +111,34 @@ def month_shift(year: int, month: int, delta: int):
     m = month - 1 + delta
     y = year + m // 12
     return y, m % 12 + 1
+
+
+def _post_int(value, default=None):
+    """把请求里的 id 参数安全转成 int，失败返回 default。
+
+    直接拿用户输入的字符串喂给 ORM 的 filter(id=...) 会抛
+    ``ValueError: Field 'id' expected a number`` 导致 500，这里统一兜底。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_year_month(request):
+    """从 GET 参数解析 (year, month)，非法或越界时回退到当前周期。
+
+    越界的 y（负数 / >9999）或 m 传给 datetime.date 会抛 ValueError → 500，
+    因此在入口处钳制。
+    """
+    try:
+        y = int(request.GET.get("y", 0) or 0)
+        m = int(request.GET.get("m", 0) or 0)
+    except (TypeError, ValueError):
+        y = m = 0
+    if not (1 <= y <= 9999 and 1 <= m <= 12):
+        return current_period()
+    return y, m
 
 
 def _assignment_matrix(schedule: Schedule):
@@ -319,7 +353,8 @@ def team_manage(request):
         if user_role(request) == "member":
             error = "队员账号为只读，只能查看，不能修改排班数据。"
         elif action == "save_constraints":
-            team = teams.filter(id=request.POST.get("team_id")).first()
+            tid = _post_int(request.POST.get("team_id"))
+            team = teams.filter(id=tid).first() if tid else None
             if team:
                 try:
                     team.daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
@@ -332,7 +367,11 @@ def team_manage(request):
                 for rn, op, cnt in zip(role_names, role_ops, role_counts):
                     rn = (rn or "").strip()
                     if rn:
-                        role_reqs[rn] = {"op": op or ">=", "count": int(cnt or 0)}
+                        try:
+                            count = int(cnt or 0)
+                        except (TypeError, ValueError):
+                            count = 0
+                        role_reqs[rn] = {"op": op or ">=", "count": count}
                 team.role_reqs = role_reqs
                 try:
                     rb_min = max(1, int(request.POST.get("rest_min") or 2))
@@ -349,9 +388,9 @@ def team_manage(request):
                 from urllib.parse import quote
                 return redirect(f"{request.path}?team={team.id}&saved=1{gq}")
 
-        if action == "batch_shift":
+        elif action == "batch_shift":
             # 批量修改默认班次（用于中班/夜班倒班时统一切换）
-            pids = request.POST.getlist("person_ids")
+            pids = [pid for pid in (_post_int(v) for v in request.POST.getlist("person_ids")) if pid is not None]
             new_shift = request.POST.get("batch_shift", "")
             if new_shift not in FIXED_SHIFTS:
                 error = "无效的班次。"
@@ -365,7 +404,7 @@ def team_manage(request):
                 message = f"已把 {n} 名人员的默认班次改为「{new_shift}」。"
                 return redirect(request.get_full_path())
 
-        if action == "import":
+        elif action == "import":
             text = request.POST.get("import_text", "")
             uploaded = request.FILES.get("import_file")
             parse_error = ""
@@ -429,9 +468,12 @@ def team_manage(request):
                     error = "部分人员导入失败：" + "；".join(row_errors[:5])
 
         elif action == "delete":
-            pid = request.POST.get("person_id")
+            pid = _post_int(request.POST.get("person_id"))
             if pid:
-                Person.objects.filter(id=pid).delete()
+                qs = Person.objects.filter(id=pid)
+                if ug:
+                    qs = qs.filter(team__group=ug)
+                qs.delete()
                 message = "已删除该人员。"
 
         elif action == "add_team":
@@ -448,7 +490,7 @@ def team_manage(request):
                 return redirect(f"{request.path}?team={tn}{gq}")
 
         elif action == "delete_team":
-            tid = request.POST.get("team_id")
+            tid = _post_int(request.POST.get("team_id"))
             confirm = (request.POST.get("confirm_text") or "").strip()
             team = Team.objects.filter(id=tid).first() if tid else None
             if not team:
@@ -465,7 +507,8 @@ def team_manage(request):
                 return redirect(f"{request.path}?deleted={quote(tname)}{gq}")
 
         elif action == "generate":
-            team = teams.filter(id=request.POST.get("team_id")).first()
+            tid = _post_int(request.POST.get("team_id"))
+            team = teams.filter(id=tid).first() if tid else None
             if team:
                 return redirect(f"{request.path}?action=generate&team={team.id}{gq}")
 
@@ -557,12 +600,12 @@ def _run_generate(request, team: Team):
     """用班组存储的约束调用引擎生成排班，返回重定向到结果页。"""
     if not team.daily_headcount or team.daily_headcount <= 0:
         from urllib.parse import quote
-        return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}&error=daily")
+        return redirect(f"/teams/?group={team.group_id or ''}&team={team.id}&error=daily")
     y, m = current_period()
     start, end, days = period_range(y, m)
     persons = Person.objects.filter(team=team, is_active=True).prefetch_related("roles").order_by("name")
     if not persons:
-        return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}")
+        return redirect(f"/teams/?group={team.group_id or ''}&team={team.id}")
     worker_snapshot = [
         {"name": p.name, "roles": list(p.roles.values_list("name", flat=True)),
          "worked": p.worked_so_far, "required": p.required_shifts,
@@ -694,15 +737,23 @@ def person_edit(request, person_id):
         return redirect("scheduler:person_detail", person_id=person.id)
     message = ""
     if request.method == "POST":
-        selected = request.POST.getlist("roles")
+        selected = [rid for rid in (_post_int(v) for v in request.POST.getlist("roles")) if rid is not None]
         new_role_names = request.POST.get("new_roles", "")
         person.roles.set(Role.objects.filter(id__in=selected))
         for rn in re.split(r"[,，、\s]+", new_role_names.strip()):
             if rn:
                 role, _ = Role.objects.get_or_create(name=rn)
                 person.roles.add(role)
-        team_id = request.POST.get("team")
-        person.team = Team.objects.filter(id=team_id).first() if team_id else None
+        team_id = _post_int(request.POST.get("team"))
+        if team_id:
+            tq = Team.objects.filter(id=team_id)
+            if ug:
+                tq = tq.filter(group=ug)
+            new_team = tq.first()
+            if new_team is not None:
+                person.team = new_team
+        else:
+            person.team = None
         person.default_shift = request.POST.get("default_shift") or "早班"
         person.is_active = request.POST.get("is_active") == "on"
         try:
@@ -737,13 +788,7 @@ def person_detail(request, person_id):
     error = ""
 
     # 月份参数；默认 = 25号起算的下一月周期
-    try:
-        y = int(request.GET.get("y", 0))
-        m = int(request.GET.get("m", 0))
-    except ValueError:
-        y = m = 0
-    if not (y and 1 <= m <= 12):
-        y, m = current_period()
+    y, m = _parse_year_month(request)
 
     schedule = _schedule_for(person, y, m)
 
@@ -837,13 +882,7 @@ def shift_board(request):
     else:
         selected_group = groups.filter(id=sel_group).first() if sel_group.isdigit() else None
 
-    try:
-        y = int(request.GET.get("y", 0))
-        m = int(request.GET.get("m", 0))
-    except ValueError:
-        y = m = 0
-    if not (y and 1 <= m <= 12):
-        y, m = current_period()
+    y, m = _parse_year_month(request)
     start, end, days = period_range(y, m)
 
     schedules = _latest_schedules_for_month(y, m, selected_group) if selected_group else []
@@ -903,6 +942,8 @@ def shift_detail(request, year, month, day, shift):
         selected_group = ug
     else:
         selected_group = Group.objects.filter(id=sel_group).first() if sel_group.isdigit() else None
+    if not (1 <= year <= 9999 and 1 <= month <= 12):
+        return redirect("scheduler:shift_board")
     start, end, days = period_range(year, month)
     if not (0 <= day < days) or shift not in FIXED_SHIFTS:
         return redirect("scheduler:shift_board")
