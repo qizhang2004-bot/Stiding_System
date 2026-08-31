@@ -41,6 +41,17 @@ class ViewSafetyTests(TestCase):
         })
         self.assertEqual(resp.status_code, 200)
 
+    def test_save_constraints_warns_when_daily_exceeds_people(self):
+        # team_a 只有 1 名启用人员，每天 3 人不可行 → 应带 warn=daily 提示
+        resp = self.client.post(reverse("scheduler:team_manage"), {
+            "action": "save_constraints",
+            "team_id": str(self.team_a.id),
+            "daily_headcount": "3",
+            "rest_min": "2", "rest_max": "4", "min_shift_target": "18",
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("warn=daily", resp["Location"])
+
     def test_cannot_delete_cross_group_person(self):
         resp = self.client.post(reverse("scheduler:team_manage"), {
             "action": "delete", "person_id": str(self.person_b.id),

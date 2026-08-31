@@ -463,7 +463,10 @@ function liveCheck() {
     if (!elCap || !elRoles) return;
 
     // 总容量
-    if (daily > 0 && target > 0) {
+    if (daily > TOTAL_PEOPLE) {
+        elCap.innerHTML = '<span class="text-danger fw-semibold">⚠ 每天应上人数 ' + daily +
+            ' 人 大于启用人数 ' + TOTAL_PEOPLE + ' 人，无法排班（每人每天最多上 1 班）。请降低每天人数或增加启用人员。</span>';
+    } else if (daily > 0 && target > 0) {
         const total = daily * DAYS;
         const mw = minWorkDays(DAYS, restMax);
         // 规则1：最多能满 = floor(总班次/目标班数)；需豁免 = 总人数 - 最多能满

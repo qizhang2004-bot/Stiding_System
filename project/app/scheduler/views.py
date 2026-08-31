@@ -348,6 +348,8 @@ def team_manage(request):
         message = f"已保存「{default_team.name}」的排班约束。"
     if request.GET.get("error") == "daily":
         error = "请先填写「该班应上人数（每天）」（大于 0）再生成排班。"
+    if request.GET.get("warn") == "daily":
+        error = "⚠️ 每天应上人数大于该班组启用人数，无法排班（每人每天最多上 1 班）。请降低每天人数或增加启用人员。"
 
     if request.method == "POST":
         action = request.POST.get("action", "")
@@ -387,7 +389,9 @@ def team_manage(request):
                 team.exempt_names = request.POST.getlist("exempt")
                 team.save()
                 from urllib.parse import quote
-                return redirect(f"{request.path}?team={team.id}&saved=1{gq}")
+                active_count = Person.objects.filter(team=team, is_active=True).count()
+                warn = "&warn=daily" if team.daily_headcount > active_count else ""
+                return redirect(f"{request.path}?team={team.id}&saved=1{warn}{gq}")
 
         elif action == "batch_shift":
             # 批量修改默认班次（用于中班/夜班倒班时统一切换）
