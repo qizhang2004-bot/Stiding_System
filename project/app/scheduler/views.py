@@ -1044,6 +1044,9 @@ def schedule_result(request, pk):
 
 @login_required
 def schedule_list(request):
+    # 队员（只读）不可访问排班记录
+    if user_role(request) == "member":
+        return redirect("scheduler:index")
     ug = user_group(request)
     records = Schedule.objects.select_related("team")
     if ug:

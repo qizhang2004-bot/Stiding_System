@@ -173,9 +173,11 @@
     <a class="nav-link {% if '/board/' in request.path %}active{% endif %}" href="{{ u_board }}">
         <span class="ico">📅</span>班次展示
     </a>
+    {% if request.user.profile.role != 'member' %}
     <a class="nav-link {% if request.path == u_list %}active{% endif %}" href="{{ u_list }}">
         <span class="ico">📋</span>排班记录
     </a>
+    {% endif %}
     </div>
     <div class="mobile-meta">
         <span class="text-muted-light">人员 {{ person_count|default:"—" }} 人 · 班组 {{ team_count|default:"—" }} 个</span>
