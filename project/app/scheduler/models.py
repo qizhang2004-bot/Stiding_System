@@ -35,6 +35,10 @@ class Team(models.Model):
     # 1.1 该班应上人数（每天下井总人数）
     daily_headcount = models.IntegerField("该班应上人数（每天）", default=0)
 
+    # 1.1b 每个班次每天的人数（早班/中班/晚班各多少人，如 {"早班":3,"中班":5,"夜班":4}）
+    #      填了则按每班精确人数排班，优先于 daily_headcount
+    shift_demand = models.JSONField("每班每天人数", default=dict)
+
     # 1.2 固定岗位应上人数 {"电工":{"op":">=","count":2}}
     role_reqs = models.JSONField("固定岗位应上人数", default=dict)
 

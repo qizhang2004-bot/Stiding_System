@@ -182,12 +182,15 @@ def index(request):
 # ---------------------------------------------------------------------------
 # 班组管理（点击班组 → 显示存储约束 + 该班人员）
 # ---------------------------------------------------------------------------
-def _parse_import_text(text: str):
-    """解析导入文本，返回 [(班组, 姓名, [岗位...], 已上班数, 应上班数, 默认班次), ...]。
+def _parse_import_text(text: str, group_names=None):
+    """解析导入文本，返回 [(队组, 班组, 姓名, [岗位...], 已上班数, 应上班数, 默认班次), ...]。
 
-    每行（推荐）：班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次
+    每行两种格式：
+      ① 班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次          （队组账号用）
+      ② 队组-班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次      （超管用，最前方加队组）
       - 默认班次可写 早班/中班/晚班，写在最后、可省略（省略则保持默认「早班」）
     """
+    group_names = group_names or set()
     items = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -227,16 +230,23 @@ def _parse_import_text(text: str):
         worked, required = (counts[0], counts[1]) if len(counts) == 2 else \
                            (0, counts[0]) if len(counts) == 1 else (0, 0)
         if "-" in line:
-            team = parts.pop(0)
+            first = parts.pop(0)
         else:
-            team = ""
+            first = ""
+        # 第一个字段若是已知队组名，则它是「队组」，第二个字段才是「班组」
+        group = ""
+        if first in group_names:
+            group = first
+            team = parts.pop(0) if parts else ""
+        else:
+            team = first
         if not parts:
             continue
         name = parts.pop(0)
         roles = []
         for p in parts:
             roles.extend([r.strip() for r in re.split(r"[,，、]+", p) if r.strip()])
-        items.append((team, name, roles, worked, required, default_shift))
+        items.append((group, team, name, roles, worked, required, default_shift))
     return items
 
 
@@ -315,6 +325,16 @@ def team_manage(request):
                     team.daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
                 except ValueError:
                     pass
+                # 每班每天人数（早班/中班/晚班），填了的班次才生效
+                shift_demand = {}
+                for s in FIXED_SHIFTS:
+                    try:
+                        v = int(request.POST.get(f"shift_{s}") or 0)
+                    except ValueError:
+                        v = 0
+                    if v > 0:
+                        shift_demand[s] = v
+                team.shift_demand = shift_demand
                 role_names = request.POST.getlist("role_names")
                 role_ops = request.POST.getlist("role_ops")
                 role_counts = request.POST.getlist("role_counts")
@@ -339,6 +359,22 @@ def team_manage(request):
                 from urllib.parse import quote
                 return redirect(f"{request.path}?team={team.id}&saved=1{gq}")
 
+        if action == "batch_shift":
+            # 批量修改默认班次（用于中班/夜班倒班时统一切换）
+            pids = request.POST.getlist("person_ids")
+            new_shift = request.POST.get("batch_shift", "")
+            if new_shift not in FIXED_SHIFTS:
+                error = "无效的班次。"
+            elif not pids:
+                error = "请先勾选要修改的人员。"
+            else:
+                qs = Person.objects.filter(id__in=pids)
+                if ug:
+                    qs = qs.filter(team__group=ug)
+                n = qs.update(default_shift=new_shift)
+                message = f"已把 {n} 名人员的默认班次改为「{new_shift}」。"
+                return redirect(request.get_full_path())
+
         if action == "import":
             text = request.POST.get("import_text", "")
             uploaded = request.FILES.get("import_file")
@@ -360,7 +396,8 @@ def team_manage(request):
                 except Exception as e:  # noqa: BLE001
                     parse_error = f"文件解析失败：{e}"
                     text = ""
-            parsed = _parse_import_text(text)
+            group_names = set(Group.objects.values_list("name", flat=True))
+            parsed = _parse_import_text(text, group_names)
             if parse_error:
                 error = parse_error
             elif not parsed:
@@ -368,18 +405,22 @@ def team_manage(request):
             else:
                 created_p = 0
                 row_errors = []
-                for team, nm, roles, worked, required, default_shift in parsed:
+                for grp, team, nm, roles, worked, required, default_shift in parsed:
                     try:
                         person, is_new = Person.objects.get_or_create(name=nm)
                         if is_new:
                             created_p += 1
-                        # 归属班组：队组账号归自己队组；超管用 URL 指定的队组；都没有才按名称匹配第一个
-                        target_group = ug or selected_group
-                        if target_group:
-                            tname = team or "检修班"
-                            person.team, _ = Team.objects.get_or_create(group=target_group, name=tname)
-                        elif team:
-                            person.team = Team.objects.filter(name=team).first()
+                        # 归属队组：文本里写了队组 > 账号自己的队组 > URL 指定队组 > 空
+                        if grp:
+                            g = Group.objects.filter(name=grp).first()
+                        else:
+                            g = ug or selected_group
+                        # 归属班组
+                        tname = team or "检修班"
+                        if g:
+                            person.team, _ = Team.objects.get_or_create(group=g, name=tname)
+                        else:
+                            person.team = Team.objects.filter(name=tname).first()
                         person.worked_so_far = worked
                         person.required_shifts = required
                         # 默认班次：显式写了就用；没写保持默认「早班」
@@ -523,7 +564,9 @@ def team_manage(request):
 
 def _run_generate(request, team: Team):
     """用班组存储的约束调用引擎生成排班，返回重定向到结果页。"""
-    if not team.daily_headcount or team.daily_headcount <= 0:
+    # 每班每天人数（早/中/晚），填了才生效；优先于每天总人数
+    shift_demand = {k: v for k, v in (team.shift_demand or {}).items() if v}
+    if not (team.daily_headcount and team.daily_headcount > 0) and not shift_demand:
         from urllib.parse import quote
         return redirect(f"/teams/?group={team.group_id or ""}&team={team.id}&error=daily")
     y, m = current_period()
@@ -556,8 +599,9 @@ def _run_generate(request, team: Team):
 
     # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
     non_exempt_count = len([p for p in persons if p.name not in exempt_set])
+    daily_total_cap = sum(shift_demand.values()) if shift_demand else (team.daily_headcount or 0)
     cap = capacity_analysis(
-        len(persons), team.daily_headcount or 0, days,
+        len(persons), daily_total_cap, days,
         rest_max, cap_target,
         exempt_count=len(persons) - non_exempt_count,
     )
@@ -567,7 +611,9 @@ def _run_generate(request, team: Team):
         "workers": worker_snapshot,
         "shifts": FIXED_SHIFTS,
         "days": days,
-        "daily_total": team.daily_headcount or 0,
+        # 有每班人数时用每班精确人数，否则用每天总人数
+        "daily_total": (team.daily_headcount or None) if not shift_demand else None,
+        "shift_demand": shift_demand,
         "role_req": team.role_reqs or {},
         "min_shift_target": team.min_shift_target or None,
         "worker_default_shift": default_shift_map,
@@ -612,7 +658,7 @@ def _run_generate(request, team: Team):
         # 整体无解：创建记录保存诊断信息（无排班明细）
         record = Schedule.objects.create(
             team=team, year=y, month=m, start_date=start, days=days,
-            shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
+            shifts=FIXED_SHIFTS, shift_demand=shift_demand, daily_total=daily_total_cap,
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
             rest_block={"min": 2, "max": rest_max},

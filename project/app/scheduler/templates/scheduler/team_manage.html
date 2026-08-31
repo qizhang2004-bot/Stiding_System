@@ -114,6 +114,17 @@
                 <input type="number" name="daily_headcount" class="form-control" min="0" value="{{ team.daily_headcount }}">
             </div>
             <div class="col-md-4">
+                <label class="form-label fw-semibold">1.1b 每班每天人数 <span class="text-muted-light small">（填了按每班精确排，优先于每天总人数）</span></label>
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text">早班</span>
+                    <input type="number" name="shift_早班" class="form-control" min="0" value="{{ team.shift_demand.早班|default:'' }}" placeholder="0">
+                    <span class="input-group-text">中班</span>
+                    <input type="number" name="shift_中班" class="form-control" min="0" value="{{ team.shift_demand.中班|default:'' }}" placeholder="0">
+                    <span class="input-group-text">夜班</span>
+                    <input type="number" name="shift_夜班" class="form-control" min="0" value="{{ team.shift_demand.夜班|default:'' }}" placeholder="0">
+                </div>
+            </div>
+            <div class="col-md-4">
                 <label class="form-label fw-semibold">1.3 连休范围（天）</label>
                 <div class="input-group">
                     <span class="input-group-text">≥</span>
@@ -260,6 +271,21 @@
 <div class="glass-card">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
         <div class="card-title mb-0">👥 「{{ team.name }}」的人员</div>
+        {% if can_edit %}
+        <form method="post" id="batchShiftForm" onsubmit="return confirm('确定批量修改选中人员的默认班次？');">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="batch_shift">
+            <div class="d-flex align-items-center gap-2">
+                <span class="text-muted-light small">批量改默认班次：</span>
+                <select name="batch_shift" class="form-select form-select-sm" style="width:auto;">
+                    <option value="早班">早班</option>
+                    <option value="中班">中班</option>
+                    <option value="晚班">晚班</option>
+                </select>
+                <button class="btn btn-sm btn-primary">应用</button>
+            </div>
+        </form>
+        {% endif %}
         <span class="text-muted-light small" id="peopleCount">{{ rows|length }} 人</span>
     </div>
     {% if rows %}
@@ -282,6 +308,7 @@
         <table class="table align-middle" id="teamPeople">
             <thead>
                 <tr>
+                    <th style="width:32px;"><input type="checkbox" id="checkAllPersons" onchange="document.querySelectorAll('.personCheck').forEach(c=>c.checked=this.checked)"></th>
                     <th>姓名</th><th>岗位</th><th class="text-center">默认班次</th>
                     <th class="text-center">已上班数</th><th class="text-center">应上班数</th>
                     <th class="text-center">操作</th>
@@ -290,6 +317,7 @@
             <tbody>
             {% for p, worked in rows %}
                 <tr data-roles="{% for r in p.roles.all %}{{ r.name }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                    <td><input type="checkbox" class="personCheck" name="person_ids" value="{{ p.id }}" form="batchShiftForm"></td>
                     <td class="fw-bold">{{ p.name }}
                         {% if not p.is_active %}<span class="badge text-bg-secondary ms-1" style="border-radius:8px;">已禁用</span>{% endif %}
                     </td>
