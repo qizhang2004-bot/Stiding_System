@@ -71,15 +71,23 @@
                             {{ cell.date|date:"d" }}{% if cell.date == today %}<span class="text-primary"> ●</span>{% endif %}
                         </div>
                         {% for info in cell.shifts %}
-                            <a class="d-block text-decoration-none mb-1"
-                               href="{% url 'scheduler:shift_detail' year month cell.index info.name %}?group={{ selected_group.id }}">
-                                <div class="badge w-100" style="background:linear-gradient(90deg,#6a9cf5,#8fb8ff); border-radius:8px; font-size:.8rem;">
-                                    {{ info.name }}：<b>{{ info.total }}</b>人
-                                </div>
-                                <div class="small text-muted-light" style="font-size:.68rem;">
-                                    {% for tname, cnt in info.teams %}{{ tname }} {{ cnt }}人{% if not forloop.last %} · {% endif %}{% endfor %}
-                                </div>
-                            </a>
+                            <div class="mb-1">
+                                <a class="d-block text-decoration-none"
+                                   href="{% url 'scheduler:shift_detail' year month cell.index info.name %}?group={{ selected_group.id }}">
+                                    <div class="badge w-100" style="background:linear-gradient(90deg,#6a9cf5,#8fb8ff); border-radius:8px; font-size:.8rem;">
+                                        {{ info.name }}：<b>{{ info.total }}</b>人
+                                    </div>
+                                    {% if info.teams %}
+                                    <div class="small text-muted-light" style="font-size:.68rem;">
+                                        {% for tname, cnt in info.teams %}{{ tname }} {{ cnt }}人{% if not forloop.last %} · {% endif %}{% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </a>
+                                {% if can_add %}
+                                <a class="small text-decoration-none text-muted-light" style="font-size:.7rem;"
+                                   href="{% url 'scheduler:shift_add' year month cell.index info.name %}?group={{ selected_group.id }}">＋加人</a>
+                                {% endif %}
+                            </div>
                         {% endfor %}
                     </td>
                     {% else %}

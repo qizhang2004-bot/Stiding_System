@@ -59,6 +59,35 @@ class ViewSafetyTests(TestCase):
         self.assertIn("查看", content2)
         self.assertNotIn("改班", content2)
 
+    def test_shift_add_adds_resting_person(self):
+        # team_a 再加一人「丙」（当天休息），「甲」已上早班
+        person_c = Person.objects.create(name="丙", team=self.team_a, required_shifts=18)
+        sch = Schedule.objects.create(
+            team=self.team_a, year=2025, month=5, start_date=date(2025, 4, 25), days=30,
+            shifts=["早班", "中班", "晚班"],
+        )
+        Assignment.objects.create(schedule=sch, person=self.person_a, day=0, shift="早班")
+        url = reverse("scheduler:shift_add", args=[2025, 5, 0, "早班"])
+
+        # 管理员查看：显示休息的「丙」，不显示已上班的「甲」
+        resp = self.client.get(url)
+        content = resp.content.decode()
+        self.assertIn("丙", content)
+        self.assertNotIn("甲", content)
+
+        # 点「丙」加人 → 创建 Assignment
+        resp2 = self.client.post(url, {"person_id": str(person_c.id)})
+        self.assertEqual(resp2.status_code, 302)
+        self.assertTrue(Assignment.objects.filter(
+            schedule=sch, person=person_c, day=0, shift="早班").exists())
+
+    def test_shift_add_member_forbidden(self):
+        member = User.objects.create_user("member_c", password="pw")
+        UserProfile.objects.create(user=member, group=self.group_a, role="member")
+        self.client.force_login(member)
+        resp = self.client.get(reverse("scheduler:shift_add", args=[2025, 5, 0, "早班"]))
+        self.assertEqual(resp.status_code, 302)
+
     def test_save_constraints_bad_team_id_no_500(self):
         resp = self.client.post(reverse("scheduler:team_manage"), {
             "action": "save_constraints", "team_id": "abc", "daily_headcount": "3",

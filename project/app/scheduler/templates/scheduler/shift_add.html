@@ -1,0 +1,33 @@
+{% extends "scheduler/base.html" %}
+{% block title %}{{ date|date:"m月d日" }} {{ shift }} 加人{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="page-title mb-0">{{ date|date:"Y年m月d日" }} · {{ shift }} 加人</h4>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'scheduler:shift_board' %}?group={{ selected_group.id|default:'' }}&y={{ year }}&m={{ month }}">← 返回班次展示</a>
+</div>
+
+{% if message %}<div class="alert alert-success">{{ message }}</div>{% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+{% if groups %}
+    {% for g in groups %}
+    <div class="glass-card">
+        <div class="card-title">🏷️ {{ g.team }}<span class="text-muted-light small ms-2">当天休息 {{ g.resting|length }} 人，点击即可加入「{{ shift }}」</span></div>
+        <div class="d-flex flex-wrap gap-2">
+            {% for p in g.resting %}
+            <form method="post" class="d-inline" onsubmit="return confirm('确定把 {{ p.name }} 加为 {{ date|date:"m月d日" }} 的{{ shift }}吗？');">
+                {% csrf_token %}
+                <input type="hidden" name="person_id" value="{{ p.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary">{{ p.name }} ＋</button>
+            </form>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="glass-card text-center py-5 text-muted-light">
+        <div style="font-size:3rem;">👥</div>
+        <div class="mt-2">这一天所有人员都已上班，没有可加的人了。</div>
+    </div>
+{% endif %}
+{% endblock %}

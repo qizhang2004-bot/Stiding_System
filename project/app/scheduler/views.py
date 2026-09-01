@@ -919,13 +919,12 @@ def shift_board(request):
         shift_infos = []
         for s in FIXED_SHIFTS:
             teams_info = board[d][s]
-            if teams_info:
-                shift_infos.append({
-                    "name": s,
-                    "total": sum(len(n) for n in teams_info.values()),
-                    "teams": [(tname, len(names)) for tname, names in teams_info.items()],
-                })
-                day_total += shift_infos[-1]["total"]
+            shift_infos.append({
+                "name": s,
+                "total": sum(len(n) for n in teams_info.values()),
+                "teams": [(tname, len(names)) for tname, names in teams_info.items()],
+            })
+            day_total += shift_infos[-1]["total"]
         cells.append({"index": d, "date": start + timedelta(days=d),
                       "shifts": shift_infos, "total": day_total})
     while len(cells) % 7 != 0:
@@ -945,6 +944,7 @@ def shift_board(request):
         "selected_group": selected_group,
         "user_group": ug,
         "schedule_count": len(schedules),
+        "can_add": user_role(request) in ("super", "team_admin"),
     })
 
 
@@ -1002,6 +1002,77 @@ def shift_detail(request, year, month, day, shift):
         "groups": groups,
         "selected_group": selected_group,
         "is_member": user_role(request) == "member",
+    })
+
+
+@login_required
+def shift_add(request, year, month, day, shift):
+    """某天某班次的「加人」：列出当天休息（未上班）的人员，按班组分组，点选加入该班次。"""
+    if user_role(request) == "member":
+        return redirect("scheduler:shift_board")
+    ug = user_group(request)
+    sel_group = request.GET.get("group", "")
+    if ug:
+        selected_group = ug
+    else:
+        selected_group = Group.objects.filter(id=sel_group).first() if sel_group.isdigit() else None
+
+    if not (1 <= year <= 9999 and 1 <= month <= 12):
+        return redirect("scheduler:shift_board")
+    start, end, days = period_range(year, month)
+    if not (0 <= day < days) or shift not in FIXED_SHIFTS:
+        return redirect("scheduler:shift_board")
+    ddate = start + timedelta(days=day)
+    gid = selected_group.id if selected_group else ""
+
+    message = ""
+    error = ""
+    if request.method == "POST":
+        pid = _post_int(request.POST.get("person_id"))
+        person = Person.objects.select_related("team").filter(id=pid).first() if pid else None
+        if not person:
+            error = "人员不存在或已被删除。"
+        elif person.team is None:
+            error = "该人员未分组，无法加人。"
+        elif ug and person.team.group_id != ug.id:
+            error = "只能给本队组的人员加人。"
+        else:
+            schedule = _schedule_for(person, year, month)
+            if not schedule:
+                error = f"「{person.team.name}」本月还没有排班，无法加人。请先生成排班。"
+            else:
+                assignment, _ = Assignment.objects.get_or_create(
+                    schedule=schedule, person=person, day=day, defaults={"shift": shift})
+                assignment.shift = shift
+                assignment.save()
+                from urllib.parse import quote
+                return redirect(f"{request.path}?group={gid}&added={quote(person.name)}")
+
+    added_name = request.GET.get("added", "")
+    if added_name:
+        message = f"已把「{added_name}」加为 {ddate:%m月%d日} 的{shift}。"
+
+    groups = []
+    schedules = _latest_schedules_for_month(year, month, selected_group) if selected_group else []
+    for sch in schedules:
+        team = sch.team
+        if not team:
+            continue
+        persons = list(Person.objects.filter(team=team, is_active=True).order_by("name"))
+        if not persons:
+            continue
+        working_ids = set(Assignment.objects.filter(schedule=sch, day=day).values_list("person_id", flat=True))
+        resting = [p for p in persons if p.id not in working_ids]
+        if resting:
+            groups.append({"team": team.name, "resting": resting})
+
+    return render(request, "scheduler/shift_add.html", {
+        "year": year, "month": month, "day": day, "shift": shift,
+        "date": ddate,
+        "groups": groups,
+        "selected_group": selected_group,
+        "message": message,
+        "error": error,
     })
 
 

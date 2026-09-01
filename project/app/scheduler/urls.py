@@ -17,6 +17,7 @@ urlpatterns = [
     # 班次展示（日历：每天每班次人数，按班组分层）
     path("board/", views.shift_board, name="shift_board"),
     path("board/<int:year>/<int:month>/<int:day>/<str:shift>/", views.shift_detail, name="shift_detail"),
+    path("board/<int:year>/<int:month>/<int:day>/<str:shift>/add/", views.shift_add, name="shift_add"),
     # 排班结果 / 记录
     path("schedule/<int:pk>/", views.schedule_result, name="schedule_result"),
     path("schedule/list/", views.schedule_list, name="schedule_list"),
