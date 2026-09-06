@@ -37,6 +37,9 @@ jobs:
           # SSH私钥
           key: ${{ secrets.SERVER_KEY }}
 
+          # 显式把敏感环境变量传给远端脚本（appleboy 默认不传 env）
+          envs: SM_DB_PASSWORD,SM_DJANGO_SECRET_KEY
+
           # 登录服务器后执行的命令
           script: |
 
