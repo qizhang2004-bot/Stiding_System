@@ -35,7 +35,7 @@ ALLOWED_HOSTS = [
 # Application definition
 
 INSTALLED_APPS = [
-    'jazzmin',
+    'grappelli',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -149,6 +149,3 @@ LOGGING = {
     },
 }
 
-
-# django-jazzmin 后台主题（层级菜单）
-from project.settings.jazzmin_conf import JAZZMIN_SETTINGS, JAZZMIN_UI_TWEAKS  # noqa: E402
