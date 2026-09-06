@@ -242,27 +242,43 @@ SSH 到服务器 → `git pull` → `pip install` → `migrate` → `collectstat
 
 > 依赖 GitHub 仓库的三个 Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_KEY`。
 
-### MySQL 数据库准备（服务器）
+### MySQL 数据库（服务器）
 
-服务器需要安装 MySQL 并创建数据库与账号（一次性的）：
+服务器 MySQL 沿用 threeminutes 项目的配置风格：应用连接账号 `django`（密码默认 `Zq//02089754`，
+可用 `DB_PASSWORD` 环境变量覆盖），库名 `stiding`。部署脚本会自动幂等建库与授权。
+
+`/etc/stiding.env` 需配置（systemd 与部署脚本都会加载）：
 
 ```bash
-sudo mysql -e "CREATE DATABASE IF NOT EXISTS stiding CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS 'stiding'@'localhost' IDENTIFIED BY '<密码>';
-GRANT ALL PRIVILEGES ON stiding.* TO 'stiding'@'localhost';
-GRANT ALL PRIVILEGES ON test_stiding.* TO 'stiding'@'localhost';
-GRANT CREATE ON *.* TO 'stiding'@'localhost';
-FLUSH PRIVILEGES;"
+SECRET_KEY=<随机密钥>
+DJANGO_SECRET_KEY=<同上>
+DB_ROOT_PASSWORD=<mysql root 密码，用于部署时自动建库授权>
+# 以下可选，默认值与 threeminutes 生产一致：
+# DB_NAME=stiding
+# DB_USER=django
+# DB_PASSWORD=Zq//02089754
+# DB_HOST=localhost
+# DB_PORT=3306
 ```
 
-在 `/etc/stiding.env` 中配置连接参数（systemd 与部署脚本都会加载）：
+### 旧 SQLite 数据迁移到 MySQL（一次性）
+
+在第一次拉取新版代码**之前**（旧代码还在用 SQLite 时），在服务器上执行：
 
 ```bash
-DB_NAME=stiding
-DB_USER=stiding
-DB_PASSWORD=<密码>
-DB_HOST=127.0.0.1
-DB_PORT=3306
+cd /home/ubuntu/Stiding_System
+source .venv/bin/activate
+export DJANGO_SETTINGS_MODULE=project.settings.prod
+python manage.py dumpdata --exclude auth.permission --exclude contenttypes --exclude sessions --exclude admin > /tmp/server_dump.json
+```
+
+然后正常部署（自动建库 + migrate），部署完成后导入旧数据：
+
+```bash
+cd /home/ubuntu/Stiding_System && source .venv/bin/activate
+export DJANGO_SETTINGS_MODULE=project.settings.prod
+python tools/import_fixture.py /tmp/server_dump.json
+sudo systemctl restart stiding
 ```
 
 ### 常用运维命令

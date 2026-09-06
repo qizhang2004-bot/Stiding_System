@@ -57,6 +57,9 @@ jobs:
             # 更新Python依赖
             pip install -r requirements.txt
 
+            # 幂等建库与授权（root 密码从 /etc/stiding.env 的 DB_ROOT_PASSWORD 读取，不进仓库）
+            mysql -uroot -p"${DB_ROOT_PASSWORD:-}" -e "CREATE DATABASE IF NOT EXISTS stiding CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL PRIVILEGES ON stiding.* TO 'django'@'localhost'; GRANT ALL PRIVILEGES ON test_stiding.* TO 'django'@'localhost'; GRANT CREATE ON *.* TO 'django'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null || true
+
             # Django数据库迁移
             python manage.py migrate --noinput
 

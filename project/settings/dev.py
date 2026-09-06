@@ -77,13 +77,13 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 
 
-# Database（MySQL；连接参数可用环境变量覆盖；默认值用于本地开发）
+# Database（MySQL；本地开发默认连 docker mysql 容器，连接参数可用环境变量覆盖）
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': os.environ.get('DB_NAME', 'stiding'),
-        'USER': os.environ.get('DB_USER', 'stiding'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'stiding123'),
+        'USER': os.environ.get('DB_USER', 'root'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', 'Zq//02089754'),
         'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
         'PORT': os.environ.get('DB_PORT', '3306'),
         'OPTIONS': {
