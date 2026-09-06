@@ -50,13 +50,13 @@ jobs:
 
             # 用 GitHub Secrets 同步写服务器环境变量文件（systemd 与部署脚本共用）
             sudo bash -c "cat > /etc/stiding.env <<'EOF'
-DJANGO_SECRET_KEY=$SM_DJANGO_SECRET_KEY
-DB_NAME=stiding
-DB_USER=django
-DB_PASSWORD=$SM_DB_PASSWORD
-DB_HOST=localhost
-DB_PORT=3306
-EOF"
+            DJANGO_SECRET_KEY=$SM_DJANGO_SECRET_KEY
+            DB_NAME=stiding
+            DB_USER=django
+            DB_PASSWORD=$SM_DB_PASSWORD
+            DB_HOST=localhost
+            DB_PORT=3306
+            EOF"
 
             # 进入Python虚拟环境
             source /home/ubuntu/Stiding_System/.venv/bin/activate
