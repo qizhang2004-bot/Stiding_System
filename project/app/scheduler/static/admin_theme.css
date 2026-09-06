@@ -1,5 +1,5 @@
 /* ============================================================
-   后台主题：纯渐变色背景 + 毛玻璃卡片
+   后台主题：纯渐变色背景 + 毛玻璃卡片（Django 原生 admin）
    配色：
      #ed6f00  橙（渐变起点）
      #fbcb72  杏黄（渐变中点）
@@ -7,84 +7,88 @@
    ============================================================ */
 
 /* ---------- 全局渐变背景 ---------- */
-body.grp,
 body {
     background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
     background-attachment: fixed !important;
 }
 
 /* ---------- 顶部标题栏：深蓝紫毛玻璃 ---------- */
-#grp-header {
-    background: rgba(39, 43, 87, 0.82) !important;
+#header {
+    background: rgba(39, 43, 87, 0.85) !important;
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.28) !important;
-    box-shadow: 0 4px 18px rgba(39, 43, 87, 0.35) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow: 0 4px 18px rgba(39, 43, 87, 0.35);
+    height: auto;
+    padding: 12px 40px;
+    color: #fff;
 }
-#grp-header * {
+#header a:link, #header a:visited,
+#header a, #user-tools a:link, #user-tools a:visited, #user-tools a {
     color: #ffffff !important;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-#grp-navigation ul li a {
-    color: rgba(255, 255, 255, 0.92) !important;
-    border-radius: 8px !important;
+#branding h1 {
+    color: #ffffff !important;
+    font-weight: 800;
 }
-#grp-navigation ul li.grp-selected a,
-#grp-navigation ul li a:hover {
-    background: rgba(255, 255, 255, 0.18) !important;
+#user-tools a:hover {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
 }
 
 /* ---------- 面包屑：半透明毛玻璃 ---------- */
-#grp-breadcrumbs {
+div.breadcrumbs {
     background: rgba(255, 255, 255, 0.45) !important;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.5) !important;
-    border-radius: 10px !important;
-    margin: 10px 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    border-radius: 10px;
+    margin: 12px 0;
+    color: #272b57 !important;
 }
-#grp-breadcrumbs * { color: #272b57 !important; }
+div.breadcrumbs a {
+    color: #272b57 !important;
+}
 
 /* ---------- 内容卡片：白色毛玻璃 ---------- */
-.grp-module,
 .module,
-.grp-group,
-.grp-changelist-actions,
-#grp-content .grp-module,
-.grp-content-container .grp-module {
+.module.filtered,
+#content-main .module,
+#content-related .module {
     background: rgba(255, 255, 255, 0.62) !important;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.55) !important;
     border-radius: 14px !important;
     box-shadow: 0 8px 28px rgba(39, 43, 87, 0.18) !important;
+    overflow: hidden;
+    margin-bottom: 18px;
 }
-.grp-module h2,
-.grp-module-title,
-.grp-module h3 {
+.module h2, .module caption,
+.inline-group h2 {
     background: transparent !important;
     color: #272b57 !important;
-    border: none !important;
+    font-weight: 700;
+    border-bottom: 1px dashed rgba(39, 43, 87, 0.25) !important;
 }
 
-/* ---------- 输入框 / 下拉 / 文本域：半透明白 ---------- */
+/* ---------- 表单控件 ---------- */
 input[type="text"], input[type="password"], input[type="number"],
 input[type="email"], input[type="url"], input[type="search"],
-select, textarea, .grp-autocomplete-wrapper {
+select, textarea {
     background: rgba(255, 255, 255, 0.85) !important;
     border: 1px solid rgba(39, 43, 87, 0.25) !important;
     border-radius: 8px !important;
 }
-input[type="text"]:focus, input[type="password"]:focus,
-select:focus, textarea:focus {
+input:focus, select:focus, textarea:focus {
     border-color: #ed6f00 !important;
     box-shadow: 0 0 0 3px rgba(237, 111, 0, 0.18) !important;
 }
 
 /* ---------- 按钮：橙→杏黄渐变 ---------- */
 input[type="submit"], button[type="submit"],
-.grp-button, a.grp-button, .grp-default,
-input.grp-button, button.grp-button {
+.button, a.button, input.button, .default,
+input[type="submit"].default {
     background: linear-gradient(90deg, #ed6f00, #fbcb72) !important;
     color: #272b57 !important;
     border: none !important;
@@ -92,46 +96,86 @@ input.grp-button, button.grp-button {
     font-weight: bold !important;
     box-shadow: 0 3px 10px rgba(237, 111, 0, 0.35) !important;
 }
-input[type="submit"]:hover, button[type="submit"]:hover,
-.grp-button:hover, a.grp-button:hover {
+input[type="submit"]:hover, .button:hover, a.button:hover {
     filter: brightness(1.06);
     box-shadow: 0 5px 14px rgba(237, 111, 0, 0.45) !important;
 }
 
+/* 次要按钮（取消/删除）保留可辨识的柔和样式 */
+a.deletelink, .deletelink {
+    color: #b91c1c !important;
+}
+
 /* ---------- 表格 ---------- */
-.grp-table thead th {
+#changelist table thead th,
+table thead th {
     background: rgba(39, 43, 87, 0.85) !important;
     color: #ffffff !important;
     border: none !important;
+    padding: 10px 12px;
 }
-.grp-table tbody tr:hover td {
+table tbody tr:hover td,
+#changelist table tbody tr:hover td {
     background: rgba(237, 111, 0, 0.08) !important;
+}
+table tbody tr:nth-child(even),
+#changelist tbody tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+/* 操作栏 / 分页 */
+#changelist .actions,
+.paginator {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border: none !important;
+    border-radius: 10px;
 }
 
 /* ---------- 登录页：居中毛玻璃卡片 ---------- */
-body.login #grp-content-container {
-    max-width: 460px;
-    margin: 12vh auto !important;
+body.login {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-body.login #grp-content {
+body.login #container {
+    min-width: 380px;
+    max-width: 460px;
+}
+body.login #header {
+    background: transparent !important;
+    box-shadow: none;
+    border: none;
+    text-align: center;
+    padding: 20px 0 0;
+}
+body.login #content {
     background: rgba(255, 255, 255, 0.72) !important;
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     border: 1px solid rgba(255, 255, 255, 0.6) !important;
     border-radius: 20px !important;
     box-shadow: 0 16px 44px rgba(39, 43, 87, 0.35) !important;
-    padding: 26px !important;
+    padding: 28px !important;
 }
-body.login #grp-content h1 {
-    color: #272b57 !important;
-    font-weight: 800 !important;
+body.login .form-row {
+    padding: 10px 0;
+}
+body.login .form-row label {
+    color: #272b57;
+    font-weight: 600;
 }
 
-/* ---------- 弹层 / 内联卡片也统一 ---------- */
-.grp-inline-group, .inline-group, .grp-stacked-inline {
+/* ---------- 弹窗 / 内联 ---------- */
+.inline-group,
+.inline-related {
     background: rgba(255, 255, 255, 0.55) !important;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-radius: 12px !important;
     border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+
+/* 消息提示 */
+.messagelist li {
+    border-radius: 10px !important;
 }
