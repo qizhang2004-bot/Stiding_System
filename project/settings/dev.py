@@ -79,6 +79,12 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # WAL + busy_timeout：降低并发写入时的 database is locked
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA busy_timeout=30000; '
+                            'PRAGMA synchronous=NORMAL;',
+            'timeout': 30,
+        },
     }
 }
 
@@ -122,3 +128,17 @@ STATIC_URL = 'static/'
 # 登录配置
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
+
+# 日志：操作审计（改班/导入/生成）与错误输出到控制台
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'root': {'handlers': ['console'], 'level': 'WARNING'},
+    'loggers': {
+        'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'scheduler.audit': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}

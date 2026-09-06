@@ -17,6 +17,11 @@ class Group(models.Model):
         verbose_name = "队组"
         verbose_name_plural = "队组"
 
+    @property
+    def person_count(self):
+        """队组下所有班组的人员总数（用于管理页统计展示）。"""
+        return Person.objects.filter(team__group=self).count()
+
     def __str__(self):
         return self.name
 
@@ -94,6 +99,9 @@ class Person(models.Model):
         verbose_name = "人员"
         verbose_name_plural = "人员"
         ordering = ["team__name", "name"]
+        indexes = [
+            models.Index(fields=["team", "is_active"], name="person_team_active_idx"),
+        ]
 
     def __str__(self):
         return self.name
@@ -127,9 +135,8 @@ class Schedule(models.Model):
     min_shift_target = models.IntegerField("最少出勤班数", default=18)
     exempt_names = models.JSONField("豁免人员名单", default=list)
 
-    # 休息规则与工作窗口
+    # 休息规则
     rest_block = models.JSONField("连休规则", default=dict)   # {"min":2,"max":4}
-    work_window = models.JSONField("工作窗口", default=dict)  # {"length":10,"max_work":6}
 
     # 求解时的人员快照（防止以后改人员导致旧结果对不上）
     worker_snapshot = models.JSONField("人员快照", default=list)
@@ -147,6 +154,10 @@ class Schedule(models.Model):
         verbose_name = "排班记录"
         verbose_name_plural = "排班记录"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["team", "year", "month"], name="sched_team_ym_idx"),
+            models.Index(fields=["-created_at"], name="sched_created_idx"),
+        ]
 
     def __str__(self):
         team = f"{self.team.name} " if self.team else ""
@@ -163,11 +174,17 @@ class Assignment(models.Model):
     )
     day = models.IntegerField("周期内第几天（0 起）")
     shift = models.CharField("班次", max_length=10, blank=True, default="")
+    role = models.CharField("当天实际岗位", max_length=50, blank=True, default="",
+        help_text="按什么岗位上班就记什么岗位；岗位约束之外的补位人员记「普通」")
 
     class Meta:
         verbose_name = "排班明细"
         verbose_name_plural = "排班明细"
         unique_together = [("schedule", "person", "day")]
+        indexes = [
+            models.Index(fields=["schedule", "day"], name="assign_sched_day_idx"),
+            models.Index(fields=["person", "schedule"], name="assign_person_idx"),
+        ]
 
     def __str__(self):
         return f"{self.person} 第{self.day + 1}天 {self.shift}"

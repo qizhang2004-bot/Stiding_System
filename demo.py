@@ -107,14 +107,6 @@ for w in worker_names:
         rest[w,d] = model.new_bool_var(f'{w}_rest_{d}')
         model.add(rest[w,d] == x[w,d].Not())
 
-# 连续上6天后休息4天
-# 任意连续10天内最多工作6天
-for w in worker_names:
-    for start in range(days - 9):
-        model.add(
-            sum(x[w, d] for d in range(start, start + 10)) <= 6
-        )
-
 # 惩罚单独休息一天（上班-休息-上班）
 single_rest = []
 

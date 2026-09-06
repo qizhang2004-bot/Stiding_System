@@ -78,6 +78,12 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # WAL + busy_timeout：降低多 gunicorn worker 并发写入时的锁冲突
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA busy_timeout=30000; '
+                            'PRAGMA synchronous=NORMAL;',
+            'timeout': 30,
+        },
     }
 }
 
@@ -120,7 +126,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 
-# 日志：把错误输出到 stderr（gunicorn 会捕获到 journalctl），便于排查线上 500
+# 日志：把错误与操作审计输出到 stderr（gunicorn 会捕获到 journalctl），便于排查线上 500
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -130,5 +136,6 @@ LOGGING = {
     'root': {'handlers': ['console'], 'level': 'ERROR'},
     'loggers': {
         'django.request': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'scheduler.audit': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
 }

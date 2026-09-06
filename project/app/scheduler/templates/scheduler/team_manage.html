@@ -10,11 +10,17 @@
 <div class="glass-card">
     <div class="card-title">🏷️ 选择队组</div>
     {% if is_super %}
-    <div class="d-flex flex-wrap gap-2">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
         {% for g in groups %}
-        <a class="btn {% if selected_group and g.id == selected_group.id %}btn-primary{% else %}btn-outline-primary{% endif %} px-4"
-           href="{% url 'scheduler:team_manage' %}?group={{ g.id }}">{{ g.name }}</a>
+        <a class="btn {% if selected_group and g.id == selected_group.id %}btn-primary{% else %}btn-outline-primary{% endif %} px-3"
+           href="{% url 'scheduler:team_manage' %}?group={{ g.id }}">{{ g.name }}
+            <span class="badge text-bg-light ms-1" style="border-radius:8px;">{{ g.teams.count }}班 · {{ g.person_count }}人</span>
+        </a>
         {% endfor %}
+        <button type="button" class="btn btn-sm btn-outline-success ms-2" data-bs-toggle="modal" data-bs-target="#addGroupModal">＋ 新增队组</button>
+        {% if selected_group %}
+        <button type="button" class="btn btn-sm btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#delGroupModal">🗑 删除队组</button>
+        {% endif %}
     </div>
     {% else %}
     <div class="d-flex flex-wrap gap-2 align-items-center">
@@ -23,6 +29,91 @@
     </div>
     {% endif %}
 </div>
+
+<!-- 新增队组弹窗（超管）：队组 + 队组管理员账号 + 队员查看账号 -->
+{% if is_super %}
+<div class="modal fade" id="addGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:18px;">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="add_group">
+                <div class="modal-header">
+                    <h5 class="modal-title">＋ 新增队组</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">队组名称</label>
+                        <input type="text" name="group_name" class="form-control" placeholder="如：综掘三队" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">队组缩写（可选，队员登录名建议用）</label>
+                        <input type="text" name="group_short" class="form-control" placeholder="如：zj三队">
+                    </div>
+                    <hr>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队组管理员账号</label>
+                            <input type="text" name="admin_username" class="form-control" placeholder="登录账号" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队组管理员密码</label>
+                            <input type="text" name="admin_password" class="form-control" placeholder="登录密码" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队员查看账号</label>
+                            <input type="text" name="member_username" class="form-control" placeholder="登录账号" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队员查看密码</label>
+                            <input type="text" name="member_password" class="form-control" placeholder="登录密码" required>
+                        </div>
+                    </div>
+                    <div class="text-muted-light small mt-2">队员账号为只读（只能查看排班）；密码不做强度校验。</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">创建队组与账号</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 删除队组确认弹窗（超管）：必须输入「删除」两个字 -->
+{% if is_super and selected_group %}
+<div class="modal fade" id="delGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:18px;">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger">⚠️ 删除队组「{{ selected_group.name }}」</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>将删除该队组，并<b>一并删除</b>：</p>
+                <ul class="text-muted-light small">
+                    <li>该队组下所有班组（人员将变为「未分组」）；</li>
+                    <li>绑定该队组的管理员与队员账号。</li>
+                </ul>
+                <p class="mb-1 fw-semibold">请在下面输入「删除」两个字以确认：</p>
+                <input type="text" id="delGroupInput" class="form-control" placeholder="请输入：删除" autocomplete="off">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <form method="post" id="delGroupForm">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_group">
+                    <input type="hidden" name="group_id" value="{{ selected_group.id }}">
+                    <input type="hidden" name="confirm_text" id="delGroupText" value="">
+                    <button type="submit" class="btn btn-danger" id="delGroupBtn" disabled>确认删除</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endif %}
 
 {% if not selected_group %}
 <div class="glass-card text-center py-5 text-muted-light">
@@ -49,6 +140,7 @@
             <button class="btn btn-sm btn-outline-primary" type="submit">+ 添加</button>
         </form>
         {% if team %}
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-bs-toggle="modal" data-bs-target="#renameTeamModal">✏ 重命名</button>
         <button type="button" class="btn btn-sm btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#delTeamModal">🗑 删除班组</button>
         {% endif %}
         {% endif %}
@@ -56,10 +148,36 @@
     {% if team %}
     <div class="text-muted-light small mt-2">
         当前选中：<b>{{ team.name }}</b>。
-        {% if can_edit %}先选中要删除的班组，再点「删除班组」。{% else %}队员账号为只读，仅可查看。{% endif %}
+        {% if can_edit %}先选中要操作的班组，再点「重命名 / 删除班组」。{% else %}队员账号为只读，仅可查看。{% endif %}
     </div>
     {% endif %}
 </div>
+
+<!-- 重命名班组弹窗 -->
+{% if team and can_edit %}
+<div class="modal fade" id="renameTeamModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:18px;">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="rename_team">
+                <input type="hidden" name="team_id" value="{{ team.id }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">✏ 重命名班组「{{ team.name }}」</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="text" name="team_name" class="form-control" value="{{ team.name }}" placeholder="新班组名称" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">保存名称</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- 删除班组确认弹窗：必须输入「删除」两个字才能确认 -->
 {% if team and can_manage %}
@@ -121,7 +239,7 @@
                     <span class="input-group-text">≤</span>
                     <input type="number" name="rest_max" class="form-control" min="1" value="{{ team.rest_block.max|default:default_rest_max }}">
                 </div>
-                <div class="form-text">休息必须连休，天数在 大于等于~小于等于 之间（不允许单休）；最大值默认 ≈（周期天数-最少上班班数）/3</div>
+                <div class="form-text">生成排班时自动按规则：<b>连休 2 天 ~ (周期天数−最少上班天数)÷3 天</b>；<b>连续上班至少 2 天、最多 (周期天数÷3)−最短休息天数 天</b></div>
             </div>
             <div class="col-md-4">
                 <label class="form-label fw-semibold">1.4 每人应上最少班数</label>
@@ -177,8 +295,8 @@
         </div>
 
         <div class="d-flex gap-2">
-            <button class="btn btn-primary px-4" type="submit">💾 保存约束</button>
-            <button class="btn btn-success px-4" type="submit" formaction="{% url 'scheduler:team_manage' %}?group={{ selected_group.id|default:'' }}&action=generate&team={{ team.id }}" formmethod="get">⚙️ 生成「{{ team.name }}」排班</button>
+            <button class="btn btn-primary px-4" type="submit" name="action" value="save_constraints">💾 保存约束</button>
+            <button class="btn btn-success px-4" type="submit" name="action" value="generate">⚙️ 生成「{{ team.name }}」排班</button>
         </div>
 
         <!-- 实时约束自检（随 每天人数/最少班数/岗位条件 实时变化） -->
@@ -229,11 +347,11 @@
         {% csrf_token %}
         <input type="hidden" name="action" value="import">
         <textarea name="import_text" class="form-control mb-2" rows="5" style="font-family:ui-monospace,Menlo,monospace;"
-                  placeholder="检修班-王磊磊-班长-0-18-早班&#10;检修班-秦湖平-班长,皮带-0-18&#10;运输班-杨志磊-电工-0-18-晚班"></textarea>
+                  placeholder="检修班-王磊磊-班长-0-18-早班&#10;检修班-秦湖平-班长,皮带-0-18&#10;李坤-普通-0-18"></textarea>
         <div class="d-flex flex-wrap gap-2 align-items-center">
             <input type="file" name="import_file" class="form-control" accept=".txt,.csv,.xlsx,.xls" style="max-width:260px;">
             <button class="btn btn-primary px-3" type="submit">导入人员</button>
-            <span class="text-muted-light small">支持粘贴文本 / 上传 txt / csv / Excel(xlsx,xls)。格式：班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次（默认班次可写 早班/中班/晚班，不写默认早班）</span>
+            <span class="text-muted-light small">支持粘贴文本 / 上传 txt / csv / Excel(xlsx,xls)。格式：班组-姓名-岗位1,岗位2-已上班数-应上班数-默认班次（默认班次可写 早班/中班/晚班，不写默认早班）。<b>没有专门岗位请填写「普通」</b>；<b>不写班组默认导入到当前班组</b>；写了班组名则与已有班组比较：同名放入该班组，不同名自动创建新班组。</span>
         </div>
     </form>
 </div>
@@ -353,7 +471,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="submit" class="btn btn-primary" form="constraintForm">保存约束并关闭</button>
+                <button type="submit" class="btn btn-primary" form="constraintForm" name="action" value="save_constraints">保存约束并关闭</button>
             </div>
         </div>
     </div>
@@ -406,6 +524,23 @@ if (delInput) {
         delBtn.disabled = true;
     });
 }
+
+// 删除队组确认：同样必须输入「删除」两个字
+const delGInput = document.getElementById('delGroupInput');
+const delGBtn = document.getElementById('delGroupBtn');
+const delGText = document.getElementById('delGroupText');
+if (delGInput) {
+    delGInput.addEventListener('input', function () {
+        const ok = this.value.trim() === '删除';
+        delGBtn.disabled = !ok;
+        delGText.value = this.value.trim();
+    });
+    document.getElementById('delGroupModal').addEventListener('show.bs.modal', function () {
+        delGInput.value = '';
+        delGText.value = '';
+        delGBtn.disabled = true;
+    });
+}
 document.querySelectorAll('.remove-row').forEach(btn => {
     btn.addEventListener('click', function () { this.closest('.input-group').remove(); });
 });
@@ -419,67 +554,39 @@ document.getElementById('addRole').addEventListener('click', function () {
     proto.parentNode.insertBefore(row, proto);
     row.querySelector('.remove-row').addEventListener('click', function () { row.remove(); });
 });
-// 生成按钮：先把约束保存（POST），再跳转生成
-document.querySelector('#constraintForm button[formaction]')?.addEventListener('click', function (e) {
-    e.preventDefault();
-    const form = document.getElementById('constraintForm');
-    // 先保存约束（POST 到当前页面地址）
-    const fd = new FormData(form);
-    fd.set('action', 'save_constraints');
-    const url = window.location.pathname + window.location.search;
-    fetch(url, { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(() => { window.location.href = this.getAttribute('formaction'); });
-});
 
 // ---- 约束实时自检 ----
 const DAYS = {{ period_days }};
 const HOLDERS = JSON.parse(document.getElementById('holdersData').textContent);
 const TOTAL_PEOPLE = {{ active_person_count }};
-function minWorkDays(days, rmax) {
-    for (let w = 0; w <= days; w++) {
-        const rest = days - w;
-        const minParts = Math.ceil(rest / rmax);
-        const maxParts = w + 1;
-        if (minParts > maxParts) continue;
-        for (let k = minParts; k <= maxParts; k++) {
-            if (2 * k <= rest && rest <= rmax * k) return w;
-        }
-    }
-    return days;
-}
-// 工作窗口「任意10天最多 wmax 班」下，days 天每人最多能上几班
-function maxWorkDays(days, wmax) {
-    const full = Math.floor(days / 10);
-    const rem = days % 10;
-    return Math.min(days, full * wmax + Math.min(wmax, rem));
-}
 function liveCheck() {
     const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
     const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
-    // 规则4：最大连休 = 10 - 至少应上班数//3（自动，不再手填）
-    const restMax = Math.max(2, 10 - Math.floor(target / 3));
     const elCap = document.getElementById('liveCapacity');
     const elRoles = document.getElementById('liveRoles');
     if (!elCap || !elRoles) return;
 
-    // 总容量
+    // 总容量：本周期一共多少个班次，最多能有多少人上满“最少班数”，差几个就需豁免几个
     if (daily > TOTAL_PEOPLE) {
         elCap.innerHTML = '<span class="text-danger fw-semibold">⚠ 每天应上人数 ' + daily +
             ' 人 大于启用人数 ' + TOTAL_PEOPLE + ' 人，无法排班（每人每天最多上 1 班）。请降低每天人数或增加启用人员。</span>';
     } else if (daily > 0 && target > 0) {
         const total = daily * DAYS;
-        const mw = minWorkDays(DAYS, restMax);
-        // 规则1：最多能满 = floor(总班次/目标班数)；需豁免 = 总人数 - 最多能满
         const maxFill = Math.min(TOTAL_PEOPLE, Math.floor(total / target));
         const need = Math.max(0, TOTAL_PEOPLE - maxFill);
-        elCap.innerHTML = '总班次：每天 ' + daily + ' 人 × ' + DAYS + ' 天 = <b>' + total + '</b> 班；' +
-            '连休规则限每人最少 <b>' + mw + '</b> 班 → 最多 <b>' + maxFill + '</b> 人能满 ' + target + ' 班' +
-            (need > 0 ? '；<span class="text-danger fw-semibold">需豁免 ' + need + ' 人</span>' : '；<span class="text-success">全员可满</span>') + '。';
+        elCap.innerHTML = '本周期共 <b>' + total + '</b> 个班次（每天 ' + daily + ' 人 × ' + DAYS + ' 天）。' +
+            '每人上满 <b>' + target + '</b> 班才算达标，' + total + ' 个班次最多只够 <b>' + maxFill +
+            '</b> 人上满' +
+            (need > 0
+                ? '，本班共 ' + TOTAL_PEOPLE + ' 人，因此有 <span class="text-danger fw-semibold">' + need +
+                  ' 人必然排不满，需要设为豁免</span>。'
+                : '，本班 ' + TOTAL_PEOPLE + ' 人，<span class="text-success">全员都能上满</span>。');
     } else {
         elCap.innerHTML = '请填写「每天应上人数」和「每人应上最少班数」。';
     }
 
-    // 每个岗位
+    // 每个岗位：岗位条件只要求“每天这个岗位上有几个人”，
+    // 与个人要上满多少班无关——多岗位人员其余时间按普通岗补班照样达标。
     let html = '';
     document.querySelectorAll('#roleRows .input-group').forEach(row => {
         const role = row.querySelector('select[name="role_names"]')?.value;
@@ -488,27 +595,17 @@ function liveCheck() {
         if (!role || cnt <= 0) return;
         const holders = HOLDERS[role] || 0;
         const roleTotal = cnt * DAYS;
-        // 该岗位最多能提供的班次 = 持有人数 × 每人最多班数
-        const wmax = Math.max(1, Math.floor(target / 3));
-        const maxWork = maxWorkDays(DAYS, wmax);
-        const cap = holders * maxWork;
-        const avg = holders > 0 ? Math.floor(roleTotal / holders) : 0;
-        const opLabel = op === '>=' ? '至少' : op === '<=' ? '至多' : '等于';
+        const opLabel = op === '>=' ? '至少' : op === '<=' ? '至多' : '恰好';
         let warn = '';
         if (holders === 0) {
-            warn = ' <span class="text-danger fw-semibold">⚠ 该岗位没有人员</span>';
-        } else if ((op === '>=' || op === '==') && roleTotal > cap) {
-            warn = ' <span class="text-danger fw-semibold">⚠ 岗位月需 ' + roleTotal + ' 班，但 ' + holders +
-                   ' 人 × 每人最多 ' + maxWork + ' 班 = ' + cap + ' 班，排不开</span>';
-        } else if (op === '==' && target > 0 && avg < target) {
-            warn = ' <span class="text-danger fw-semibold">⚠ 每天恰好 ' + cnt + ' 人，' + holders + ' 人平均最多约 ' + avg +
-                   ' 班，达不到 ' + target + ' 班——建议改「至少」或豁免该岗位人员</span>';
-        } else if (op === '==') {
-            warn = ' <span class="text-success">（每天恰好 ' + cnt + ' 人，可满足）</span>';
+            warn = ' <span class="text-danger fw-semibold">⚠ 该岗位没有人员，无法满足</span>';
+        } else if ((op === '>=' || op === '==') && roleTotal > holders * (DAYS - 2)) {
+            warn = ' <span class="text-danger fw-semibold">⚠ 该岗位全周期共需 ' + roleTotal + ' 个岗位班，' +
+                   '但 ' + holders + ' 名持有人最多只能提供约 ' + (holders * (DAYS - 2)) + ' 个岗位班，排不开</span>';
         }
-        html += '<div class="mb-1">· <b>' + role + '</b>：每天 ' + opLabel + ' ' + cnt + ' 人 × ' + DAYS + ' 天 = ' +
-                roleTotal + ' 个班，该岗位 ' + holders + ' 人' +
-                (op === '==' ? ' → 平均每人最多 ' + avg + ' 班' : '') + warn + '</div>';
+        html += '<div class="mb-1">· <b>' + role + '</b>：每天' + opLabel + ' <b>' + cnt + '</b> 人 × ' + DAYS +
+                ' 天 = ' + roleTotal + ' 个岗位班，由该岗位 ' + holders +
+                ' 名持有人轮换承担；其余时间按普通岗补班，不影响个人达标。' + warn + '</div>';
     });
     elRoles.innerHTML = html || '<div class="text-muted-light">暂无岗位条件。</div>';
 }

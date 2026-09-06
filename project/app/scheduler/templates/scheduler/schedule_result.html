@@ -61,9 +61,9 @@
         <b>⚠️ 排班不足警告：有 {{ shortfall|length }} 人未达到应上班数</b>
         <div class="mt-2">
             {% if capacity %}
-            按当前配置：每天 {{ capacity.daily }} 人 × {{ record.days }} 天 = {{ capacity.total }} 班；
-            每人最少 {{ capacity.target }} 班，且连休规则限定每人最少 <b>{{ capacity.min_work }}</b> 班
-            → 最多只有 <b>{{ capacity.max_fillable }}</b> 人能排满，本班 {{ capacity.people }} 人
+            按当前配置：每天 {{ capacity.daily }} 人 × {{ record.days }} 天 = 共 {{ capacity.total }} 班；
+            每人上满 {{ capacity.target }} 班才算达标，{{ capacity.total }} 个班次最多只够
+            <b>{{ capacity.max_fillable }}</b> 人上满，本班 {{ capacity.people }} 人
             {% if capacity.needed_exempt > 0 %}，因此<b class="text-danger">至少需要豁免 {{ capacity.needed_exempt }} 人</b>。{% else %}。{% endif %}
             {% endif %}
             <ul class="mb-2 mt-2">
@@ -155,7 +155,7 @@
 <div class="text-muted-light small mt-2">
     配置快照：班组 {{ record.team.name|default:"—" }}；每天下井 {{ record.daily_total|default:record.shift_demand }} 人；
     岗位条件 {{ record.role_reqs }}；全局最少班数 {{ record.min_shift_target }}；
-    豁免 {{ record.exempt_names|default:"无" }}；连休 {{ record.rest_block }}；每10天最多 {{ record.work_window.max_work }} 班。
+    豁免 {{ record.exempt_names|default:"无" }}；连休 {{ record.rest_block }}。
     生成时间：{{ record.created_at|date:"Y-m-d H:i:s" }}
 </div>
 {% endif %}

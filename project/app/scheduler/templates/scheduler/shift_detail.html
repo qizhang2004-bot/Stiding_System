@@ -27,9 +27,15 @@
                         <a href="{% url 'scheduler:person_detail' e.person.id %}?y={{ year }}&m={{ month }}" class="text-decoration-none">{{ e.person.name }}</a>
                     </td>
                     <td>
-                        {% for r in e.roles %}
-                            <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ r }}</span>
+                        {% if e.role %}
+                        <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ e.role }}</span>
+                        {% elif e.person %}
+                        {% for r in e.person.roles.all %}
+                        <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ r.name }}</span>
                         {% empty %}<span class="text-muted-light">—</span>{% endfor %}
+                        {% else %}
+                        <span class="text-muted-light">—</span>
+                        {% endif %}
                     </td>
                     <td class="text-center fw-bold">{{ e.worked }}</td>
                     <td class="text-center fw-semibold">{{ e.required }}</td>

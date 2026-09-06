@@ -10,20 +10,26 @@
 --------
 当设置了「最少出勤班数 + 豁免名单」时，采用**两阶段求解**：
 1. 阶段一：最大化“达到最少班数的人数”（用户的核心目标，模型不带偏离变量，搜索更快）；
-2. 阶段二：固定阶段一的达标人数，再最小化每人班数与目标的偏离、尽量贴近默认班次，
-   得到更均衡的班表（用阶段一的解作为 hint 起步，保证能快速找到可行解）。
+2. 阶段二：固定阶段一的达标人数，用**词典序多目标**优化（OR-Tools ≥9.9 多次 minimize 即词典序，
+   先写者最优先）：① 每人班数贴近目标 → ② 非豁免班数均衡 → ③ 未达标者尽量接近目标且均分 →
+   ④ 软性避免单休 → ⑤ 豁免人员尽量少且均衡。用阶段一的解作为 hint 起步。
+
+班次是硬性约束：上传/导入的班次即该人员唯一可排的班次。
+
+同配置必然产生同结果：求解器使用由配置内容派生的确定性随机种子（可用
+``config["random_seed"]`` 覆盖），重复生成不再“每次都不一样”。
 
 支持的能力（对应需求）
 ----------------------
 1. 每天下井总人数 / 每班每天人数     -> ``daily_total`` / ``shift_demand``
-2. 岗位人数条件（至少/至多/等于）    -> ``role_req``（兼容旧字段 ``role_min``）
+2. 岗位人数条件（至少/至多/等于）    -> ``role_req``（兼容旧字段 ``role_min``）；
+   一人一天只能干一个岗位（多岗位人员当天只计入一个岗位的配额）
 3. 每人每天最多上一个班              -> 内置
 4. 连休 2~4 天（不允许单休）         -> ``rest_block``（硬约束）
 5. 每人应上最少班数、可豁免、最大化达标人数 -> ``min_shift_target`` + ``exempt_workers``
-6. 任意 N 天最多上 M 班（工作窗口）  -> ``work_window``
-7. 默认班次偏好（早/中/晚）          -> ``worker_default_shift``
-8. 可行性预检 + 友好诊断             -> ``validate_config``
-9. 容量预估（最多能满班几人/需豁免几人）-> ``capacity_analysis``（纯函数）
+6. 班次硬性规则（上传/默认班次即唯一可排班次）-> ``worker_default_shift``（硬约束）
+7. 可行性预检 + 友好诊断             -> ``validate_config``
+8. 容量预估（最多能满班几人/需豁免几人）-> ``capacity_analysis``（纯函数）
 
 用法（Django 之外的独立调用）
 ----------------------------
@@ -38,7 +44,6 @@
         "min_shift_target": 18,
         "exempt_workers": ["张三"],
         "rest_block": {"min": 2, "max": 4},
-        "work_window": {"length": 10, "max_work": 6},
     }
     result = build_schedule(config)
     result.print_summary()
@@ -48,6 +53,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -64,11 +71,14 @@ class ScheduleResult:
     """排班求解结果。"""
 
     status: str = ""                 # OPTIMAL / FEASIBLE / INFEASIBLE / UNKNOWN
+    phase1_status: str = ""          # 阶段一（最大化达标人数）的求解状态，供测试判断是否证到最优
     feasible: bool = False
     message: str = ""                # 给用户看的一句话结果
     diagnostics: List[str] = field(default_factory=list)  # 可行性检查/诊断信息
     assignments: Dict[Tuple[str, int, str], bool] = field(default_factory=dict)
     #   assignments[(worker, day, shift)] = True/False，day 从 0 开始
+    role_assignments: Dict[Tuple[str, int], str] = field(default_factory=dict)
+    #   role_assignments[(worker, day)] = 当天被指派的岗位（一人一天只干一个岗位）
     worker_counts: Dict[str, int] = field(default_factory=dict)  # 每人当月班数
     single_rest: int = 0             # 总共出现的单休天数（连休<2 的天数）
     rest_run_violations: int = 0     # 连休天数超出 [min,max] 的违规次数
@@ -108,6 +118,8 @@ class ScheduleResult:
 
 # ===========================================================================
 # 二、默认权重（软性目标评分）
+# 说明：阶段二/单次求解已改用词典序多目标（优先级固定，见模块 docstring），
+# 以下权重仅作为向后兼容保留，并参与随机种子派生（保证历史行为一致）。
 # ===========================================================================
 DEFAULT_WEIGHTS = {
     "single_rest": 100,    # 每个单休日的惩罚权重（soft 模式用）
@@ -117,22 +129,17 @@ DEFAULT_WEIGHTS = {
 }
 
 
+def _derive_seed(snapshot: Dict[str, Any]) -> int:
+    """从配置快照派生确定性随机种子：同配置 -> 同种子 -> 同排班结果。"""
+    digest = hashlib.sha256(
+        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
 # ===========================================================================
 # 三、容量预估（纯数学，不依赖 Django）
 # ===========================================================================
-def _max_work_in_month(days: int, wlen: int, wmax: int) -> int:
-    """在“任意 wlen 天内最多 wmax 班”的窗口约束下，days 天内每人最多能上几班。
-
-    分段覆盖：每段长度为 wlen、最多 wmax 班，整月上限约 days * wmax / wlen；
-    对尾部不整除的部分最多还能再塞 min(wmax, 余数) 班。
-    """
-    if wlen <= 0:
-        return days
-    full = days // wlen
-    rem = days % wlen
-    return min(days, full * wmax + min(wmax, rem))
-
-
 def _min_work_days(days: int, rmax: int) -> int:
     """连休最多 rmax 天（且至少 2 天）时，一个周期里每人最少要上几天班。
 
@@ -156,7 +163,7 @@ def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4,
                    target: int = 18) -> dict:
     """快速容量参数（纯计算、不求解）：total / min_work / max_work。
 
-    已去掉「10 天最多 6 班」工作窗口，每人最多能上 days 天（无密度上限），
+    没有工作窗口限制，每人最多能上 days 天（无密度上限），
     休息天数由「每天应上人数」自然决定：人多则少休、人少则多休。
     """
     return {
@@ -182,7 +189,7 @@ def capacity_analysis(people: int, daily: int, days: int,
     返回:
         total        周期总班次 = daily * days
         min_work     连休规则限定的每人最少班数（仅非豁免人员）
-        max_work     每人最多班数（10 天 ≤6 班窗口）
+        max_work     每人最多班数（= 周期天数，无额外窗口限制）
         max_fillable 最多能有多少人排满 target
         needed_exempt 还需要豁免多少人（否则会有人排不满）
 
@@ -194,7 +201,7 @@ def capacity_analysis(people: int, daily: int, days: int,
     base = capacity_quick(people, daily, days, rest_max, target)
     # 快速公式（纯计算，秒开）
     if target > base["max_work"]:
-        # 目标班数超过工作窗口上限，没人能满
+        # 目标班数超过周期天数，没人能满
         max_fillable = 0
     else:
         max_fillable = (base["total"] // target) if target > 0 else people
@@ -221,7 +228,6 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
     shifts = config.get("shifts") or []
     demand = config.get("shift_demand") or {}
     role_req = config.get("role_req") or {}
-    window = config.get("work_window") or {}
     rest_block = config.get("rest_block") or {}
 
     # 1) 基本结构
@@ -248,12 +254,7 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
         total_daily = int(daily_total)
     else:
         total_daily = sum(int(demand.get(s) or 0) for s in shifts)
-    if window:
-        wlen = int(window.get("length", 10))
-        wmax = int(window.get("max_work", 6))
-        max_work_in_month = _max_work_in_month(days, wlen, wmax)
-    else:
-        max_work_in_month = days
+    max_work_in_month = days
 
     if total_daily > 0 and max_work_in_month > 0:
         capacity = len(workers) * max_work_in_month
@@ -262,7 +263,7 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
             diag.append(
                 f"总班次需求 {need} 超出全员容量 {capacity} "
                 f"(每天 {total_daily} 人 × {days} 天，每人最多 {max_work_in_month} 班)。"
-                f"请降低每天人数、增加人员，或放宽工作窗口。"
+                f"请降低每天人数或增加人员。"
             )
 
     # 3) 岗位人数条件容量
@@ -282,6 +283,43 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if not holders:
             diag.append(f"岗位「{role}」没有匹配的人员，无法满足条件。")
 
+    # 3b) 逐人硬性下限与豁免的联动预检（有硬性 min 时才能精确判断）
+    worker_req = config.get("worker_shift_req") or {}
+    exempt_names = set(config.get("exempt_workers") or [])
+    non_exempt_mins = 0
+    for w in workers:
+        req = worker_req.get(w.get("name"), {})
+        if w.get("name") not in exempt_names and "min" in req:
+            non_exempt_mins += int(req.get("min", 0))
+    total_need = total_daily * days
+    if non_exempt_mins > total_need:
+        diag.append(
+            f"非豁免人员的硬性最低班数合计 {non_exempt_mins} 班，"
+            f"超过周期总班次 {total_need} 班（豁免人数不够或目标太高），整体无解。"
+        )
+    else:
+        leftover = total_need - non_exempt_mins  # 豁免人员可补的剩余班次
+        for role, spec in role_req.items():
+            if isinstance(spec, (int, float)):
+                spec = {"op": ">=", "count": int(spec)}
+            op = str(spec.get("op", ">="))
+            if op not in (">=", "=="):
+                continue
+            cnt = int(spec.get("count", 0))
+            need = cnt * days
+            guaranteed = sum(
+                int(worker_req.get(w.get("name"), {}).get("min", 0))
+                for w in workers
+                if role in w.get("roles", []) and w.get("name") not in exempt_names
+            )
+            if guaranteed < need and (need - guaranteed) > leftover:
+                diag.append(
+                    f"岗位「{role}」每天 {op} {cnt} 人，{days} 天共需 {need} 人天；"
+                    f"非豁免该岗位人员硬性只保证 {guaranteed} 人天，缺口 {need - guaranteed} "
+                    f"人天大于豁免人员全部可补的 {leftover} 人天。"
+                    f"请豁免其它岗位的人员，或降低该岗位人数条件。"
+                )
+
     # 4) 休息规则检查
     if rest_block:
         rmin = int(rest_block.get("min", 2))
@@ -289,7 +327,8 @@ def validate_config(config: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if rmin < 1 or rmax < rmin:
             diag.append(f"休息规则 rest_block 不合法: min={rmin}, max={rmax}")
 
-    fatal = any("不足" in d or "超出" in d or "没有匹配" in d for d in diag)
+    fatal = any("不足" in d or "超出" in d or "没有匹配" in d or "大于豁免人员" in d
+                or "整体无解" in d for d in diag)
     structurally_bad = not workers or not shifts or days <= 0 or (not demand and not daily_total)
     ok = not fatal and not structurally_bad
     return ok, diag
@@ -319,13 +358,15 @@ def build_schedule(
                           非豁免人员尽量接近，并最大化“达标人数”。
         exempt_workers:   [name,...] 豁免人员（不需要去接近最少班数目标）
         worker_shift_req: {name: {"target":int}|{"min":int,"max":int}} 逐人覆盖
-        worker_default_shift: {name: shift} 默认班次偏好（软）
-        work_window:      {"length": int, "max_work": int} 任意 length 天内最多上
-                          max_work 班
+        worker_default_shift: {name: shift} 硬性班次：该人员只能排这个班次（上传什么班次就排什么班次）
         rest_block:       {"min": int, "max": int} 连休天数硬约束（默认 2~4），
                           即休息必须多天连休且不超过上限（含月初/月末边界）。
+        work_block:       {"min": int, "max": int} 连续上班天数硬约束（可选），
+                          默认 min=2（连续上班至少 2 天，无上限）；
+                          规则建议 min=(周期天数//3)−最长休息、max=(周期天数//3)−最短休息。
         no_single_rest:   bool 或 {"hard": bool, "weight": float} 软性避免单休
                           （仅当未设置 rest_block 时作为软目标使用）
+        random_seed:      int 求解随机种子（不传则按配置内容自动派生，同配置同结果）
 
     weights 可选字段: single_rest / shift_target / reach_target / shift_mismatch。
     """
@@ -341,7 +382,8 @@ def build_schedule(
     #          （岗位优先排入，剩余名额由「当天不上班的人」补满）
     #      2.3 要求班数约束：目标 = 全局「至少应上班数」优先，否则每人「应上班数」；
     #          非豁免尽量达标，豁免人员不参与达标、只补剩余班
-    #      2.4 休息日约束：连休 [min,max] 天 + 工作窗口（任意10天最多 max_work 班）
+    #      2.4 休息日约束：连休 [min,max] 天（含月初/月末边界）
+    #          豁免人员不参与休息规则，可自由排班
     #   ③ 求解：两阶段——先最大化达标人数，再最小化偏离 + 默认班次偏好
     # ================================================================
 
@@ -355,8 +397,8 @@ def build_schedule(
     worker_req: Dict[str, dict] = config.get("worker_shift_req") or {}
     min_shift_target = config.get("min_shift_target")
     exempt: set = set(config.get("exempt_workers") or [])
-    window = config.get("work_window") or {}
     rest_block = config.get("rest_block") or {}
+    work_block = config.get("work_block") or {}
     nsr = config.get("no_single_rest", True)
     daily_total = config.get("daily_total")   # 每天下井总人数（替代逐班人数）
     default_shift = config.get("worker_default_shift") or {}  # {name: 默认班次}
@@ -385,6 +427,33 @@ def build_schedule(
         total_need = sum(int(demand.get(s) or 0) for s in shifts) * days
     fair_target = total_need // len(names) if names else 0
     target = int(min_shift_target) if min_shift_target else fair_target
+
+    # ---------- 确定性随机种子（同配置 -> 同结果） ----------
+    seed = _derive_seed({
+        "workers": sorted(
+            (w.get("name"), sorted(w.get("roles") or []),
+             w.get("default_shift", ""), w.get("worked", 0), w.get("required", 0))
+            for w in workers
+        ),
+        "shifts": list(shifts), "days": days,
+        "daily_total": daily_total, "shift_demand": sorted(demand.items()),
+        "role_req": sorted(
+            (r, v.get("op", ">="), int(v.get("count", 0)))
+            for r, v in role_req.items()
+        ),
+        "min_shift_target": min_shift_target,
+        "exempt_workers": sorted(exempt),
+        "worker_shift_req": sorted(
+            (n, sorted(v.items())) for n, v in worker_req.items()
+        ),
+        "worker_default_shift": sorted(default_shift.items()),
+        "rest_block": sorted(rest_block.items()),
+        "work_block": sorted(work_block.items()),
+        "no_single_rest": bool(nsr),
+        "weights": sorted(weights.items()),
+    })
+    if config.get("random_seed") is not None:
+        seed = int(config["random_seed"])
 
     # ---------- 模型构建（可重复调用：阶段一/阶段二各建一次） ----------
     def build_model(with_deviation: bool = True):
@@ -424,13 +493,32 @@ def build_schedule(
                 m.add(sum(x[w, d, s] for s in shifts) <= 1)
                 m.add(y[w, d] == sum(x[w, d, s] for s in shifts))
 
-        # 约束 3：岗位人数条件（至少/至多/等于）
+        # 约束 3：岗位人数条件（至少/至多/等于）。
+        # 硬规则：一人一天最多占一个岗位名额 —— 多岗位人员当天只能计入其中一个岗位的配额；
+        # 未被指派岗位的上班人员按普通岗补位，不占任何岗位名额（否则「等于」会因名额不足无解）。
+        # 用 z[w,d,role] 表示「某人某天被指派到某岗位」，岗位条件统计 z 而不是上班天数 y。
+        constrained_roles_of = {
+            w: [r for r in role_of[names[w]] if r in role_req]
+            for w in range(len(names))
+        }
+        z: Dict[Tuple[int, int, str], Any] = {}
+        for w in range(len(names)):
+            for d in range(days):
+                for role in constrained_roles_of[w]:
+                    z[w, d, role] = m.new_bool_var(f"z_{names[w]}_{d}_{role}")
+        # 只有上班的人能占岗位名额；一人一天最多占一个岗位名额（可以不占 = 按普通岗补位）
+        for w in range(len(names)):
+            if not constrained_roles_of[w]:
+                continue
+            for d in range(days):
+                m.add(sum(z[w, d, role] for role in constrained_roles_of[w]) <= y[w, d])
+
         for role, spec in role_req.items():
             op = str(spec.get("op", ">="))
             cnt = int(spec.get("count", 0))
             holders = [name_idx[n] for n in names if role in role_of[n]]
             for d in range(days):
-                s = sum(y[w, d] for w in holders)
+                s = sum(z[w, d, role] for w in holders if (w, d, role) in z)
                 if op == "<=":
                     m.add(s <= cnt)
                 elif op == "==":
@@ -438,18 +526,7 @@ def build_schedule(
                 else:
                     m.add(s >= cnt)
 
-        # 约束 4：连续工作窗口（任意 length 天内最多 max_work 班）
-        # 豁免人员不参与休息/窗口计算，可自由上任意班（含 0 班）
-        if window:
-            wlen = int(window.get("length", 10))
-            wmax = int(window.get("max_work", 6))
-            for w in range(len(names)):
-                if names[w] in exempt:
-                    continue
-                for start in range(days - wlen + 1):
-                    m.add(sum(y[w, d] for d in range(start, start + wlen)) <= wmax)
-
-        # 约束 5：休息规则（连休天数 ∈ [min, max]，硬约束）
+        # 约束 4：休息规则（连休天数 ∈ [min, max]，硬约束）
         # 豁免人员不参与连休规则，可自由休息（连休 0 天、1 天或任意天）
         if rest_block:
             rmin = int(rest_block.get("min", 2))
@@ -482,18 +559,38 @@ def build_schedule(
                 for start in range(days - rmax):
                     m.add(sum(r[w, d] for d in range(start, start + rmax + 1)) <= rmax)
 
-        # 约束 5b：连续上班至少 2 天（禁止「休-上-休」，含月初/月末边界）
-        # 豁免人员不受此约束
+        # 约束 4b：连续上班天数 ∈ [work_run_min, work_run_max]（硬约束，含月初/月末边界）
+        # 用户规则：min = (周期天数//3) − 最长休息；max = (周期天数//3) − 最短休息。
+        # 未提供 work_block 时退化为「连续上班至少 2 天」（旧行为）。
+        # 豁免人员不受此约束。
+        wr_min = int(work_block.get("min", 2)) if work_block else 2
+        wr_max = int(work_block.get("max", 0)) if work_block else 0
         for w in range(len(names)):
             if names[w] in exempt:
                 continue
-            for d in range(1, days - 1):
-                m.add(r[w, d - 1] + y[w, d] + r[w, d + 1] <= 2)
-            if days >= 2:
-                # 月初：禁止「第1天上班、第2天就休息」（连续上班只有1天）
-                m.add(y[w, 0] + r[w, 1] <= 1)
-                # 月末：禁止「最后1天才上班」（连续上班只有1天）
-                m.add(r[w, days - 2] + y[w, days - 1] <= 1)
+            # 上班段 ≤ wr_max：任意 wr_max+1 天窗口内上班天数 ≤ wr_max（禁止连续超过上限）
+            if wr_max and wr_max >= wr_min:
+                for start in range(days - wr_max):
+                    m.add(sum(y[w, d] for d in range(start, start + wr_max + 1)) <= wr_max)
+            # 上班段 ≥ wr_min：禁止「休 + len 天班 + 休」模式（len = 1..wr_min-1），含边界
+            for length in range(1, wr_min):
+                for d in range(1, days - length):
+                    m.add(
+                        r[w, d - 1]
+                        + sum(y[w, dd] for dd in range(d, d + length))
+                        + r[w, d + length]
+                        <= length + 1
+                    )
+                if length <= days - 1:
+                    # 月初：len 天上班 + 休（禁止）
+                    m.add(sum(y[w, dd] for dd in range(0, length)) + r[w, length] <= length)
+                if length <= days - 1:
+                    # 月末：休 + len 天上班（禁止）
+                    m.add(
+                        r[w, days - length - 1]
+                        + sum(y[w, dd] for dd in range(days - length, days))
+                        <= length
+                    )
 
         # 每人班次要求
         count_v: Dict[str, Any] = {}
@@ -551,17 +648,17 @@ def build_schedule(
                     m.add(s >= y[w, d - 1] + r[w, d] + y[w, d + 1] - 2)
                     single_rest_vars.append(s)
 
-        # 默认班次偏好（软）：尽量给每人排默认班次，偏离的班次计入惩罚
-        shift_mismatch_vars: List[Any] = []
-        if default_shift and with_deviation:
-            for w in range(len(names)):
-                pref = default_shift.get(names[w])
-                if not pref:
-                    continue
-                for d in range(days):
-                    for s in shifts:
-                        if s != pref:
-                            shift_mismatch_vars.append(x[w, d, s])
+        # 班次硬性约束：导入/上传的默认班次 = 该人员唯一可排的班次。
+        # 上传早班就只能排早班，其它班次直接禁止（不是“偏好”，是硬规则）。
+        # 未指定默认班次的人员不受限制（保持兼容）。
+        for w in range(len(names)):
+            pref = default_shift.get(names[w])
+            if not pref or pref not in shifts:
+                continue
+            for d in range(days):
+                for s in shifts:
+                    if s != pref:
+                        m.add(x[w, d, s] == 0)
 
         # 解提示：按“上6休4”错峰模式给每个工人一个初始作息，帮助搜索更快找到好解
         # （仅当启用了连休硬约束时使用；豁免人员不参与，给 0 提示即尽量少排）
@@ -576,11 +673,10 @@ def build_schedule(
                     m.add_hint(y[w, d], 1 if (d + phase) % 10 < 6 else 0)
 
         track = {
-            "x": x, "y": y, "r": r,
+            "x": x, "y": y, "r": r, "z": z,
             "count_v": count_v, "reached_v": reached_v,
             "over_dev": over_dev, "under_dev": under_dev,
             "single_rest_vars": single_rest_vars,
-            "shift_mismatch_vars": shift_mismatch_vars,
             "exempt_count_vars": exempt_count_vars,
         }
         return m, track
@@ -590,7 +686,9 @@ def build_schedule(
         solver = cp_model.CpSolver()
         if limit:
             solver.parameters.max_time_in_seconds = float(limit)
-        solver.parameters.num_search_workers = 8
+        # 单线程搜索 + 固定种子 => 同配置同结果（多线程并行求解无法保证确定性）
+        solver.parameters.num_search_workers = int(config.get("num_search_workers", 1))
+        solver.parameters.random_seed = seed
         st = solver.solve(m)
         return solver, st
 
@@ -641,13 +739,62 @@ def build_schedule(
             for d in range(days):
                 for s in shifts:
                     result.assignments[(names[w], d, s)] = bool(solver.value(x[w, d, s]))
+        # 岗位指派（一人一天只干一个岗位）
+        for (w, d, role), zv in track.get("z", {}).items():
+            if solver.value(zv):
+                result.role_assignments[(names[w], d)] = role
 
-    # 需要达标目标 -> 两阶段；否则单次求解最小化偏离
-    w_sr = weights.get("single_rest", 100)
-    w_tgt = weights.get("shift_target", 2)
-    w_reach = weights.get("reach_target", 1000)
-    if isinstance(nsr, dict):
-        w_sr = float(nsr.get("weight", w_sr))
+    # 需要达标目标 -> 两阶段；否则单次求解（词典序多目标）
+    def _add_lexicographic_objectives(m, track) -> None:
+        """按优先级挂载词典序目标（OR-Tools ≥9.9：多次 minimize 即词典序，先写者最优先）：
+        ① 班数贴近目标（偏离最小）→ ② 非豁免均衡 → ③ 未达标者：最差者尽量接近目标、
+        且未达标者之间尽量均分（同一层内用 (days+2)*max−min 保证先 max 后 min）→
+        ④ 软性避免单休 → ⑤ 豁免尽量少且均衡（同样合并为一层）。
+
+        注：③/⑤ 内部两级合并进一个加权目标，减少一层求解证明（单线程下更省时间）。
+        班次是硬性约束（上传班次=唯一可排班次），不属于软目标。
+        """
+        if track["over_dev"]:
+            m.minimize(sum(track["over_dev"][nm] + track["under_dev"][nm]
+                           for nm in track["over_dev"]))
+        non_exempt_counts = [track["count_v"][nm] for nm in names if nm not in exempt]
+        if len(non_exempt_counts) >= 2:
+            max_c = m.new_int_var(0, days, "max_c")
+            min_c = m.new_int_var(0, days, "min_c")
+            m.add_max_equality(max_c, non_exempt_counts)
+            m.add_min_equality(min_c, non_exempt_counts)
+            m.minimize(max_c - min_c)
+        # 未达标者（reached=0）：u_w = 未达标者班数（达标者记 0）；
+        # min 侧用 c + days*(1-b) 把达标者排挤出最小值。
+        reached_map = track["reached_v"]
+        if reached_map:
+            short_u, short_min_exprs = {}, []
+            for nm, rch in reached_map.items():
+                b = rch.Not()
+                u = m.new_int_var(0, days, f"short_u_{nm}")
+                m.add(u == track["count_v"][nm]).only_enforce_if(b)
+                m.add(u == 0).only_enforce_if(b.Not())
+                short_u[nm] = u
+                short_min_exprs.append(track["count_v"][nm] + days * (1 - b))
+            if short_u:
+                max_s = m.new_int_var(0, days, "short_max")
+                m.add_max_equality(max_s, list(short_u.values()))
+                if len(short_u) >= 2:
+                    # 域上限 2*days：表达式 c + days*(1-b) 在全员达标时为 c+days ≤ 2*days
+                    min_s = m.new_int_var(0, 2 * days, "short_min")
+                    m.add_min_equality(min_s, short_min_exprs)
+                    # 权重 days+2 > days ≥ max_s，保证层内先最小化 max_s、再最小化 (max_s-min_s)
+                    m.minimize((days + 2) * max_s - min_s)
+                else:
+                    m.minimize(max_s)
+        if track["single_rest_vars"]:
+            m.minimize(sum(track["single_rest_vars"]))
+        if track["exempt_count_vars"]:
+            exempt_max = m.new_int_var(0, days, "exempt_max")
+            exempt_min = m.new_int_var(0, days, "exempt_min")
+            m.add_max_equality(exempt_max, track["exempt_count_vars"])
+            m.add_min_equality(exempt_min, track["exempt_count_vars"])
+            m.minimize((days + 2) * exempt_max - exempt_min)
 
     m1, t1 = build_model(with_deviation=False)
     if t1["reached_v"]:
@@ -658,41 +805,20 @@ def build_schedule(
             result.feasible = False
             result.status = "INFEASIBLE" if st1 == cp_model.INFEASIBLE else "UNKNOWN"
             result.message = ("无解。请结合诊断信息调整参数：降低每天人数、放宽岗位人数条件、"
-                              "增加人员或放宽工作窗口/休息规则。")
+                              "增加人员或放宽休息规则。")
             return result
         best = int(sol1.objective_value)
+        result.phase1_status = "OPTIMAL" if st1 == cp_model.OPTIMAL else "FEASIBLE"
 
-        # ---- 阶段二：固定达标人数，最小化偏离（以阶段一的解作为起点 hint） ----
+        # ---- 阶段二：固定达标人数，按词典序多目标优化（以阶段一解为 hint 起步） ----
         m2, t2 = build_model(with_deviation=True)
         m2.add(sum(t2["reached_v"].values()) >= best)
-        # 用阶段一的解给阶段二一个可行起点，避免重新搜索
         for w in range(len(names)):
             for d in range(days):
                 m2.add_hint(t2["y"][w, d], int(sol1.value(t1["y"][w, d])))
                 for s in shifts:
                     m2.add_hint(t2["x"][w, d, s], int(sol1.value(t1["x"][w, d, s])))
-        # 非豁免尽量贴近目标班数（超 target 有惩罚，避免无谓超排）；
-        # 剩余班次自然落到豁免人员头上，再由「豁免尽量少且均衡」兜底
-        obj = sum(t2["over_dev"][nm] + t2["under_dev"][nm] for nm in t2["over_dev"]) * w_tgt
-        # 均衡：非豁免班数尽量均匀（max-min 最小），让多出来的班次分摊到多人头上
-        non_exempt_counts = [t2["count_v"][nm] for nm in names if nm not in exempt]
-        if len(non_exempt_counts) >= 2:
-            max_c = m2.new_int_var(0, days, "max_c")
-            min_c = m2.new_int_var(0, days, "min_c")
-            m2.add_max_equality(max_c, non_exempt_counts)
-            m2.add_min_equality(min_c, non_exempt_counts)
-            obj += (max_c - min_c) * weights.get("balance", 10)
-        obj += sum(t2["single_rest_vars"]) * w_sr
-        obj += sum(t2["shift_mismatch_vars"]) * weights.get("shift_mismatch", 1)
-        # 豁免人员尽量少且均匀：最小化最大班数 + 最小化「最大-最小」差值
-        if t2["exempt_count_vars"]:
-            exempt_max = m2.new_int_var(0, days, "exempt_max")
-            exempt_min = m2.new_int_var(0, days, "exempt_min")
-            m2.add_max_equality(exempt_max, t2["exempt_count_vars"])
-            m2.add_min_equality(exempt_min, t2["exempt_count_vars"])
-            obj += exempt_max * weights.get("exempt_balance", 5)
-            obj += (exempt_max - exempt_min) * weights.get("exempt_spread", 3)
-        m2.minimize(obj)
+        _add_lexicographic_objectives(m2, t2)
         sol2, st2 = _solve(m2, phase2_seconds)
         if st2 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             _extract(sol2, t2, st2)
@@ -708,11 +834,9 @@ def build_schedule(
             f"{len(result.reached)} 人达到最少 {target} 班。"
         )
     else:
-        # 无达标目标：单次求解最小化偏离（兼容旧行为）
-        obj = sum(t1["over_dev"][nm] + t1["under_dev"][nm] for nm in t1["over_dev"]) * w_tgt
-        obj += sum(t1["single_rest_vars"]) * w_sr
-        obj += sum(t1["shift_mismatch_vars"]) * weights.get("shift_mismatch", 1)
-        m1.minimize(obj)
+        # 无达标目标：单次求解，按词典序最小化偏离/均衡/单休/班次偏好
+        m1, t1 = build_model(with_deviation=True)
+        _add_lexicographic_objectives(m1, t1)
         sol1, st1 = _solve(m1, time_limit_seconds)
         if st1 in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             _extract(sol1, t1, st1)
@@ -721,7 +845,7 @@ def build_schedule(
             result.feasible = False
             result.status = "INFEASIBLE" if st1 == cp_model.INFEASIBLE else "UNKNOWN"
             result.message = ("无解。请结合诊断信息调整参数：降低每天人数、放宽岗位人数条件、"
-                              "增加人员或放宽工作窗口/休息规则。")
+                              "增加人员或放宽休息规则。")
 
     return result
 
@@ -773,7 +897,6 @@ def demo() -> None:
         "min_shift_target": 18,
         "exempt_workers": ["洪泽文"],
         "rest_block": {"min": 2, "max": 4},
-        "work_window": {"length": 10, "max_work": 6},
     }
     result = build_schedule(config)
     result.print_summary()

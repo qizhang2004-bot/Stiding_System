@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
-import calendar
+import logging
 import re
+import threading
+import time
+from collections import defaultdict
 from datetime import date, timedelta
+from typing import Dict, List, Optional, Tuple
 
 from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -15,12 +20,20 @@ from .models import Assignment, Group, Person, Role, Schedule, Team, UserProfile
 # 排班算法模型（单一文件，见 scheduling.py 的模块说明）
 from project.app.scheduler.scheduling import build_schedule, capacity_analysis, capacity_quick
 
-# 工作窗口（固定：任意 10 天最多上 6 班）
-DEFAULT_WORK_WINDOW = {"length": 10, "max_work": 6}
-
 # 周期起算日：25 号开始算下一个月（某月 M 的周期 = 上月25号 ~ 本月24号）
 PERIOD_START_DAY = 25
 FIXED_SHIFTS = ["早班", "中班", "晚班"]
+
+# 操作审计日志（改班/导入/生成等敏感操作，输出到 scheduler.audit logger）
+audit_log = logging.getLogger("scheduler.audit")
+
+# 登录防爆破：同 IP+账号 5 次失败锁 5 分钟（进程内存级，够用即可）
+_login_attempts: Dict[str, List[float]] = defaultdict(list)
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_SECONDS = 300
+
+# 生成排班互斥锁：同一班组同时只允许一个生成任务（避免并发重复求解/写库冲突）
+_generate_locks: Dict[int, threading.Lock] = defaultdict(threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -33,9 +46,21 @@ def login_view(request):
     if request.method == "POST":
         username = (request.POST.get("username") or "").strip()
         password = request.POST.get("password") or ""
+        key = f"{request.META.get('REMOTE_ADDR', '?')}:{username}"
+        now = time.monotonic()
+        attempts = [t for t in _login_attempts.get(key, []) if now - t < LOGIN_LOCK_SECONDS]
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            wait = max(1, int(LOGIN_LOCK_SECONDS - (now - attempts[0])))
+            audit_log.warning("登录被限流 ip=%s user=%s", request.META.get("REMOTE_ADDR"), username)
+            return render(request, "scheduler/login.html", {
+                "error": f"尝试次数过多，请 {wait} 秒后再试。",
+                "next": request.GET.get("next", ""),
+            })
         user = authenticate(request, username=username, password=password)
         if user is not None:
+            _login_attempts.pop(key, None)
             auth_login(request, user)
+            audit_log.info("登录成功 user=%s", username)
             next_url = request.POST.get("next") or request.GET.get("next") or "/"
             if not url_has_allowed_host_and_scheme(
                 next_url, allowed_hosts={request.get_host()},
@@ -43,6 +68,8 @@ def login_view(request):
             ):
                 next_url = "/"
             return redirect(next_url)
+        _login_attempts[key] = attempts + [now]
+        audit_log.warning("登录失败 ip=%s user=%s", request.META.get("REMOTE_ADDR"), username)
         error = "账号或密码错误，请重试。"
     return render(request, "scheduler/login.html", {
         "error": error,
@@ -193,6 +220,101 @@ def person_worked_auto(person: Person, schedule: Schedule = None) -> int:
     return count
 
 
+def _worked_auto_batch(pairs: List[Tuple[Person, Optional[Schedule]]]) -> Dict[int, int]:
+    """批量计算「已上班数」（替代逐人 person_worked_auto，避免 N+1 查询）。
+
+    pairs: [(人员, 其当月排班), ...]；返回 {person_id: 已上班数}。
+    """
+    result = {p.id: p.worked_so_far for p, _ in pairs}
+    today = date.today()
+    by_schedule: Dict[int, Tuple[Schedule, List[int]]] = {}
+    for p, sch in pairs:
+        if sch and sch.start_date:
+            by_schedule.setdefault(sch.id, (sch, []))[1].append(p.id)
+    for sch_id, (sch, pids) in by_schedule.items():
+        for pid, day in Assignment.objects.filter(
+            schedule_id=sch_id, person_id__in=pids
+        ).values_list("person_id", "day"):
+            if sch.start_date + timedelta(days=day) <= today:
+                result[pid] += 1
+    return result
+
+
+def _xlsx_response(workbook, filename: str):
+    """把 openpyxl Workbook 输出为 xlsx 下载响应（中文文件名用 RFC 5987 编码）。"""
+    from io import BytesIO
+    from urllib.parse import quote
+    from django.http import HttpResponse
+    buf = BytesIO()
+    workbook.save(buf)
+    buf.seek(0)
+    resp = HttpResponse(
+        buf.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    resp["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(filename)}"
+    return resp
+
+
+def _export_board_xlsx(year: int, month: int, start, days: int, board: dict):
+    """导出班次展示 Excel：第一行日期；早班/中班/晚班各一行，
+    每个格子里按班组分类列出班组成员，班组之间空行隔开，文本自动换行。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "班次展示"
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center", vertical="center")
+    wrap = Alignment(wrap_text=True, vertical="top")
+    ws.cell(row=1, column=1, value="日期").font = bold
+    for d in range(days):
+        c = ws.cell(row=1, column=2 + d, value=f"{(start + timedelta(days=d)):%m-%d}")
+        c.font = bold
+        c.alignment = center
+    for i, s in enumerate(FIXED_SHIFTS):
+        row = 2 + i
+        ws.cell(row=row, column=1, value=s).font = bold
+        ws.cell(row=row, column=1).alignment = center
+        for d in range(days):
+            teams = board[d][s]
+            # 班组与班组之间空行隔开
+            text = "\n\n".join(
+                f"{tname}：{'、'.join(names)}" for tname, names in teams.items() if names
+            )
+            cell = ws.cell(row=row, column=2 + d, value=text)
+            cell.alignment = wrap
+    ws.column_dimensions["A"].width = 8
+    for col in range(2, days + 2):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 26
+    return _xlsx_response(wb, f"班次展示_{year}年{month:02d}月.xlsx")
+
+
+def _export_person_xlsx(person, year: int, month: int, start, days: int, assignments: dict):
+    """导出个人日历 Excel：第一行日期，第二行该人当天是否上班（上班显示班次，休息显示「休息」）。"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "个人日历"
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center", vertical="center")
+    wrap = Alignment(wrap_text=True, vertical="top")
+    ws.cell(row=1, column=1, value="日期").font = bold
+    for d in range(days):
+        c = ws.cell(row=1, column=2 + d, value=f"{(start + timedelta(days=d)):%m-%d}")
+        c.font = bold
+        c.alignment = center
+    ws.cell(row=2, column=1, value=person.name).font = bold
+    for d in range(days):
+        cell = ws.cell(row=2, column=2 + d, value=assignments.get(d) or "休息")
+        cell.alignment = wrap
+    ws.column_dimensions["A"].width = 10
+    for col in range(2, days + 2):
+        ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 8
+    return _xlsx_response(wb, f"个人日历_{person.name}_{year}年{month:02d}月.xlsx")
+
+
 # ---------------------------------------------------------------------------
 # 首页
 # ---------------------------------------------------------------------------
@@ -204,7 +326,7 @@ def index(request):
     if ug:
         qs = qs.filter(team__group=ug)
         persons_qs = persons_qs.filter(team__group=ug)
-    recent = qs[:5]
+    recent = qs.order_by("-created_at")[:5]
     return render(request, "scheduler/index.html", {
         "recent": recent,
         "person_count": persons_qs.count(),
@@ -276,6 +398,10 @@ def _parse_import_text(text: str, group_names=None):
         else:
             team = first
         if not parts:
+            # 只写了「姓名-数字」没有班组（如 王五-0-18）：第一段当姓名，
+            # 班组留空 → 导入时默认归入当前选中的班组
+            if team and team not in group_names:
+                items.append((group, "", team, [], worked, required, default_shift))
             continue
         name = parts.pop(0)
         roles = []
@@ -312,6 +438,66 @@ def _rows_from_csv(text):
     return lines
 
 
+def _save_team_constraints(request, team) -> Tuple[str, str]:
+    """把「排班约束」表单写入班组。返回 (warn 片段, 错误信息)。
+
+    含字段级审核：数字非法、岗位条件 op 白名单、连休最小值钳到 2、
+    豁免名单只保留本班组真实人员。
+    """
+    try:
+        daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
+    except ValueError:
+        return "", "「该班应上人数（每天）」必须是整数。"
+    role_names = request.POST.getlist("role_names")
+    role_ops = request.POST.getlist("role_ops")
+    role_counts = request.POST.getlist("role_counts")
+    role_reqs = {}
+    for rn, op, cnt in zip(role_names, role_ops, role_counts):
+        rn = (rn or "").strip()
+        if not rn or len(rn) > 50:
+            continue
+        op = op if op in (">=", "<=", "==") else ">="
+        try:
+            count = max(0, int(cnt or 0))
+        except (TypeError, ValueError):
+            count = 0
+        role_reqs[rn] = {"op": op, "count": count}
+    try:
+        # 需求：休息至少 2 天（禁止单休），强制下限为 2
+        rb_min = max(2, int(request.POST.get("rest_min") or 2))
+        rb_max = max(rb_min, int(request.POST.get("rest_max") or 4))
+    except ValueError:
+        rb_min, rb_max = 2, 4
+    try:
+        min_shift_target = max(0, int(request.POST.get("min_shift_target") or 0))
+    except ValueError:
+        return "", "「每人应上最少班数」必须是整数。"
+    # 豁免名单：只保留本班组真实存在的启用人员（按勾选顺序去重）
+    exempt_selected = request.POST.getlist("exempt")
+    if exempt_selected:
+        valid = set(Person.objects.filter(
+            team=team, name__in=exempt_selected, is_active=True
+        ).values_list("name", flat=True))
+        exempt_names = [n for n in exempt_selected if n in valid]
+    else:
+        exempt_names = []
+
+    team.daily_headcount = daily_headcount
+    team.role_reqs = role_reqs
+    team.rest_block = {"min": rb_min, "max": rb_max}
+    team.min_shift_target = min_shift_target
+    team.exempt_names = exempt_names
+    team.save()
+    audit_log.info(
+        "保存约束 team=%s daily=%s roles=%s rest=%s target=%s exempt=%s user=%s",
+        team.name, daily_headcount, role_reqs, team.rest_block,
+        min_shift_target, exempt_names, request.user.username,
+    )
+    active_count = Person.objects.filter(team=team, is_active=True).count()
+    warn = "&warn=daily" if daily_headcount > active_count else ""
+    return warn, ""
+
+
 @require_http_methods(["GET", "POST"])
 @login_required
 def team_manage(request):
@@ -344,54 +530,96 @@ def team_manage(request):
     error = ""
     if request.GET.get("deleted"):
         message = f"已删除班组「{request.GET['deleted']}」。"
+    if request.GET.get("renamed") and default_team:
+        message = f"班组已重命名为「{request.GET['renamed']}」。"
+    if request.GET.get("added_group"):
+        message = "已新增队组，队组管理员与队员账号已创建。"
+    if request.GET.get("deleted_group"):
+        message = f"已删除队组「{request.GET['deleted_group']}」（其下班组与绑定账号一并删除）。"
     if request.GET.get("saved") and default_team:
         message = f"已保存「{default_team.name}」的排班约束。"
     if request.GET.get("error") == "daily":
         error = "请先填写「该班应上人数（每天）」（大于 0）再生成排班。"
     if request.GET.get("warn") == "daily":
         error = "⚠️ 每天应上人数大于该班组启用人数，无法排班（每人每天最多上 1 班）。请降低每天人数或增加启用人员。"
+    if request.GET.get("busy"):
+        error = "该班组正在生成排班，请稍候再试。"
 
     if request.method == "POST":
         action = request.POST.get("action", "")
         if user_role(request) == "member":
             error = "队员账号为只读，只能查看，不能修改排班数据。"
-        elif action == "save_constraints":
+        elif action == "add_group":
+            # 超级管理员新增队组：队组 + 队组管理员账号 + 队员只读账号（密码不做强度校验）
+            if user_role(request) != "super":
+                error = "只有超级管理员可以新增队组。"
+            else:
+                gname = (request.POST.get("group_name") or "").strip()
+                gshort = (request.POST.get("group_short") or "").strip()
+                auser = (request.POST.get("admin_username") or "").strip()
+                apwd = request.POST.get("admin_password") or ""
+                muser = (request.POST.get("member_username") or "").strip()
+                mpwd = request.POST.get("member_password") or ""
+                if not gname or len(gname) > 50:
+                    error = "请填写队组名称（不超过 50 字）。"
+                elif not auser or not apwd:
+                    error = "请填写队组管理员账号和密码。"
+                elif not muser or not mpwd:
+                    error = "请填写队员查看账号和密码。"
+                elif Group.objects.filter(name=gname).exists():
+                    error = f"队组「{gname}」已存在。"
+                elif User.objects.filter(username__in=[auser, muser]).exists():
+                    error = "账号已存在，请换一个账号名。"
+                else:
+                    g2 = Group.objects.create(name=gname, short_name=gshort)
+                    for uname, pwd, role in ((auser, apwd, "team_admin"),
+                                             (muser, mpwd, "member")):
+                        u = User.objects.create_user(uname, password=pwd)
+                        UserProfile.objects.create(user=u, group=g2, role=role)
+                    audit_log.info("新增队组 %s admin=%s member=%s user=%s",
+                                   gname, auser, muser, request.user.username)
+                    return redirect(f"{request.path}?group={g2.id}&added_group=1")
+
+        elif action == "delete_group":
+            # 超级管理员删除队组：需输入「删除」二次确认；连带删除其下班组与绑定账号
+            gid = _post_int(request.POST.get("group_id"))
+            confirm = (request.POST.get("confirm_text") or "").strip()
+            g2 = Group.objects.filter(id=gid).first() if gid else None
+            if user_role(request) != "super":
+                error = "只有超级管理员可以删除队组。"
+            elif not g2:
+                error = "队组不存在或已被删除。"
+            elif confirm != "删除":
+                error = "确认失败：请输入「删除」两个字才能删除队组。"
+            else:
+                gname = g2.name
+                User.objects.filter(profile__group=g2, is_superuser=False).delete()
+                Team.objects.filter(group=g2).delete()
+                g2.delete()
+                audit_log.info("删除队组 %s user=%s", gname, request.user.username)
+                from urllib.parse import quote
+                return redirect(f"{request.path}?deleted_group={quote(gname)}")
+
+        elif action in ("save_constraints", "generate"):
             tid = _post_int(request.POST.get("team_id"))
             team = teams.filter(id=tid).first() if tid else None
-            if team:
-                try:
-                    team.daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
-                except ValueError:
-                    pass
-                role_names = request.POST.getlist("role_names")
-                role_ops = request.POST.getlist("role_ops")
-                role_counts = request.POST.getlist("role_counts")
-                role_reqs = {}
-                for rn, op, cnt in zip(role_names, role_ops, role_counts):
-                    rn = (rn or "").strip()
-                    if rn:
-                        try:
-                            count = int(cnt or 0)
-                        except (TypeError, ValueError):
-                            count = 0
-                        role_reqs[rn] = {"op": op or ">=", "count": count}
-                team.role_reqs = role_reqs
-                try:
-                    rb_min = max(1, int(request.POST.get("rest_min") or 2))
-                    rb_max = max(rb_min, int(request.POST.get("rest_max") or 4))
-                except ValueError:
-                    rb_min, rb_max = 2, 4
-                team.rest_block = {"min": rb_min, "max": rb_max}
-                try:
-                    team.min_shift_target = max(0, int(request.POST.get("min_shift_target") or 0))
-                except ValueError:
-                    pass
-                team.exempt_names = request.POST.getlist("exempt")
-                team.save()
-                from urllib.parse import quote
-                active_count = Person.objects.filter(team=team, is_active=True).count()
-                warn = "&warn=daily" if team.daily_headcount > active_count else ""
-                return redirect(f"{request.path}?team={team.id}&saved=1{warn}{gq}")
+            if not team:
+                error = "请先选择一个班组。"
+            else:
+                warn, err = _save_team_constraints(request, team)
+                if err:
+                    error = err
+                elif action == "save_constraints":
+                    return redirect(f"{request.path}?team={team.id}&saved=1{warn}{gq}")
+                else:
+                    # 生成排班：同一班组只允许一个生成任务，防止并发重复求解
+                    lock = _generate_locks[team.id]
+                    if not lock.acquire(blocking=False):
+                        return redirect(f"{request.path}?team={team.id}&busy=1{gq}")
+                    try:
+                        return _run_generate(request, team)
+                    finally:
+                        lock.release()
 
         elif action == "batch_shift":
             # 批量修改默认班次（用于中班/夜班倒班时统一切换）
@@ -406,6 +634,8 @@ def team_manage(request):
                 if ug:
                     qs = qs.filter(team__group=ug)
                 n = qs.update(default_shift=new_shift)
+                audit_log.info("批量改默认班次 user=%s count=%s shift=%s",
+                               request.user.username, n, new_shift)
                 message = f"已把 {n} 名人员的默认班次改为「{new_shift}」。"
                 return redirect(request.get_full_path())
 
@@ -438,23 +668,50 @@ def team_manage(request):
                 error = "没有解析到任何人员，请检查导入格式。"
             else:
                 created_p = 0
+                updated_p = 0
                 row_errors = []
                 for grp, team, nm, roles, worked, required, default_shift in parsed:
+                    # ---- 字段级审核 ----
+                    nm = (nm or "").strip()
+                    if not nm or len(nm) > 50:
+                        row_errors.append(f"{nm or '(空)'}: 姓名无效（非空且不超过 50 字）")
+                        continue
+                    roles = list(dict.fromkeys(
+                        r for r in roles if r and (r or "").strip() and len(r) <= 50
+                    ))
+                    # 没有专门岗位的按「普通」处理（提示用户填写普通，未填时自动兜底）
+                    if not roles:
+                        roles = ["普通"]
+                    worked = max(0, min(999, int(worked or 0)))
+                    required = max(0, min(999, int(required or 0)))
+                    if default_shift not in FIXED_SHIFTS:
+                        default_shift = ""
+                    # 归属队组：文本里写了队组 > 账号自己的队组 > URL 指定队组 > 空
+                    if grp:
+                        g = Group.objects.filter(name=grp).first()
+                    else:
+                        g = ug or selected_group
                     try:
                         person, is_new = Person.objects.get_or_create(name=nm)
+                        # 跨队组保护：队组账号不能把其它队组的人员划到自己名下
+                        if not is_new and ug and person.team and person.team.group_id \
+                                and person.team.group_id != ug.id:
+                            row_errors.append(f"{nm}: 已属于其它队组「{person.team.group.name}」，跳过")
+                            continue
                         if is_new:
                             created_p += 1
-                        # 归属队组：文本里写了队组 > 账号自己的队组 > URL 指定队组 > 空
-                        if grp:
-                            g = Group.objects.filter(name=grp).first()
                         else:
-                            g = ug or selected_group
-                        # 归属班组
-                        tname = team or "检修班"
-                        if g:
-                            person.team, _ = Team.objects.get_or_create(group=g, name=tname)
+                            updated_p += 1
+                        # 归属班组：文本写了班组名 → 与已有班组比较，同名放入、不同名创建新班组；
+                        # 没写班组名 → 默认导入到当前选中的班组
+                        if team:
+                            tname = team
+                            if g:
+                                person.team, _ = Team.objects.get_or_create(group=g, name=tname)
+                            else:
+                                person.team = Team.objects.filter(name=tname).first()
                         else:
-                            person.team = Team.objects.filter(name=tname).first()
+                            person.team = default_team
                         person.worked_so_far = worked
                         person.required_shifts = required
                         # 默认班次：显式写了就用；没写保持默认「早班」
@@ -466,7 +723,9 @@ def team_manage(request):
                             person.roles.add(role)
                     except Exception as e:  # noqa: BLE001 —— 单行出错不中断整体导入
                         row_errors.append(f"{nm}: {e}")
-                message = (f"导入完成：新增人员 {created_p} 人"
+                audit_log.info("导入人员 user=%s 新增=%s 更新=%s 失败=%s",
+                               request.user.username, created_p, updated_p, len(row_errors))
+                message = (f"导入完成：新增 {created_p} 人、更新 {updated_p} 人"
                            f"{'（已归入本队组「' + ug.name + '」的班组）' if ug else ''}"
                            f"，共处理 {len(parsed)} 条记录。")
                 if row_errors:
@@ -478,8 +737,33 @@ def team_manage(request):
                 qs = Person.objects.filter(id=pid)
                 if ug:
                     qs = qs.filter(team__group=ug)
+                deleted = list(qs.values_list("name", flat=True))
                 qs.delete()
+                audit_log.info("删除人员 %s user=%s", deleted, request.user.username)
                 message = "已删除该人员。"
+
+        elif action == "rename_team":
+            tid = _post_int(request.POST.get("team_id"))
+            new_name = (request.POST.get("team_name") or "").strip()
+            team = teams.filter(id=tid).first() if tid else None
+            if not team:
+                error = "班组不存在或已被删除。"
+            elif not can_edit_team(request, team):
+                error = "只能重命名本队组的班组。"
+            elif not new_name:
+                error = "请输入新班组名称。"
+            elif len(new_name) > 50:
+                error = "班组名称过长（最多 50 字）。"
+            elif Team.objects.filter(group=team.group, name=new_name).exclude(id=team.id).exists():
+                error = f"该队组已有班组「{new_name}」，请换一个名称。"
+            else:
+                old_name = team.name
+                team.name = new_name
+                team.save()
+                audit_log.info("重命名班组 %s -> %s user=%s",
+                               old_name, new_name, request.user.username)
+                from urllib.parse import quote
+                return redirect(f"{request.path}?team={team.id}&renamed={quote(new_name)}{gq}")
 
         elif action == "add_team":
             tn = (request.POST.get("team_name") or "").strip()
@@ -489,8 +773,12 @@ def team_manage(request):
                 error = "请先选择一个队组，再新增班组。"
             elif not tn:
                 error = "请输入班组名称。"
+            elif len(tn) > 50:
+                error = "班组名称过长（最多 50 字）。"
             else:
                 Team.objects.get_or_create(group=target_group, name=tn)
+                audit_log.info("添加班组 %s group=%s user=%s",
+                               tn, target_group.name, request.user.username)
                 message = f"已添加班组「{tn}」。"
                 return redirect(f"{request.path}?team={tn}{gq}")
 
@@ -508,18 +796,9 @@ def team_manage(request):
                 tname = team.name
                 # 删除班组：其人员变为未分组，排班记录保留但失去班组归属
                 team.delete()
+                audit_log.info("删除班组 %s user=%s", tname, request.user.username)
                 from urllib.parse import quote
                 return redirect(f"{request.path}?deleted={quote(tname)}{gq}")
-
-        elif action == "generate":
-            tid = _post_int(request.POST.get("team_id"))
-            team = teams.filter(id=tid).first() if tid else None
-            if team:
-                return redirect(f"{request.path}?action=generate&team={team.id}{gq}")
-
-    # 生成排班（使用该班组存储的约束）
-    if request.GET.get("action") == "generate" and default_team:
-        return _run_generate(request, default_team)
 
     # 该班人员（含按日期自动计算的已上班数）
     persons = Person.objects.filter(team=default_team).select_related("team").prefetch_related("roles").order_by("name") \
@@ -541,11 +820,16 @@ def team_manage(request):
     else:
         team_role_options = ()
 
-    # 连休最大值默认值（规则4：最大连休 = 10 - 至少应上班数//3）
+    # 连休范围默认显示：生成排班时自动按可解范围「连休 3~5 天、连续上班 4~7 天」
+    # （见 _run_generate 的说明），这里仅用于页面默认值展示。
     y0, m0 = current_period()
     _, _, period_days = period_range(y0, m0)
-    min_tgt = default_team.min_shift_target if default_team else 18
-    default_rest_max = max(2, 10 - (min_tgt // 3))
+    if default_team and (default_team.min_shift_target or 0) > 0:
+        cap_target = default_team.min_shift_target
+    else:
+        reqs = [p.required_shifts for p in persons_list if p.required_shifts > 0]
+        cap_target = (sum(reqs) // len(reqs)) if reqs else 18
+    default_rest_max = 5
 
     # 容量预估（提示最多能有多少人排满，需要豁免几人；只统计启用人员）
     capacity = None
@@ -553,15 +837,9 @@ def team_manage(request):
         people_count = Person.objects.filter(team=default_team, is_active=True).count()
         exempt_count = len([n for n in (default_team.exempt_names or []) if
                             Person.objects.filter(team=default_team, name=n, is_active=True).exists()])
-        # 预估 target：全局「至少应上班数」优先，否则用每人「应上班数」的平均
-        if (default_team.min_shift_target or 0) > 0:
-            cap_target = default_team.min_shift_target
-        else:
-            reqs = [p.required_shifts for p in persons_list if p.required_shifts > 0]
-            cap_target = (sum(reqs) // len(reqs)) if reqs else 18
         capacity = capacity_analysis(
             people_count, default_team.daily_headcount or 0, period_days,
-            max(2, 10 - (cap_target // 3)), cap_target, exempt_count,
+            default_rest_max, cap_target, exempt_count,
         )
 
     # 每个岗位的持有人数（用于实时"岗位条件可行性"检查；只统计启用人员）
@@ -604,8 +882,8 @@ def team_manage(request):
 def _run_generate(request, team: Team):
     """用班组存储的约束调用引擎生成排班，返回重定向到结果页。"""
     if not team.daily_headcount or team.daily_headcount <= 0:
-        from urllib.parse import quote
         return redirect(f"/teams/?group={team.group_id or ''}&team={team.id}&error=daily")
+    audit_log.info("开始生成排班 team=%s user=%s", team.name, request.user.username)
     y, m = current_period()
     start, end, days = period_range(y, m)
     persons = Person.objects.filter(team=team, is_active=True).prefetch_related("roles").order_by("name")
@@ -617,7 +895,6 @@ def _run_generate(request, team: Team):
          "team": team.name, "default_shift": p.default_shift}
         for p in persons
     ]
-    worker_req = {}
     default_shift_map = {}
     exempt_set = set(team.exempt_names or [])
     target_global = team.min_shift_target or 0
@@ -630,9 +907,14 @@ def _run_generate(request, team: Team):
     else:
         reqs = [p.required_shifts for p in persons if p.required_shifts > 0]
         cap_target = (sum(reqs) // len(reqs)) if reqs else 18
-    # 规则4：连休 2 ~ (10 - 至少应上班数//3) 天（已去掉「10天最多6班」工作窗口，
-    # 休息天数由每天应上人数自然决定：人多则少休、人少则多休）
-    rest_max = max(2, 10 - (cap_target // 3)) if cap_target > 0 else 4
+    # 连休范围（用户规则）：最少 2 天；最大值 = (周期天数 − 至少上班天数) // 3（向下取整）。
+    # 连续上班：至少 2 天（禁止只上一天班就休息）；
+    # 上限 = (周期天数 // 3) − 最短连续休息天。
+    eff_target = cap_target if cap_target > 0 else 18
+    rest_min = 2
+    rest_max = max(2, (days - eff_target) // 3)
+    work_run_min = 2
+    work_run_max = max(2, days // 3 - rest_min)
 
     # 容量预估：最多能有多少人排满目标（豁免人员不参与休息计算，不占最少班数）
     non_exempt_count = len([p for p in persons if p.name not in exempt_set])
@@ -641,7 +923,6 @@ def _run_generate(request, team: Team):
         rest_max, cap_target,
         exempt_count=len(persons) - non_exempt_count,
     )
-    hard_targets = non_exempt_count <= cap["max_fillable"]
 
     base_config = {
         "workers": worker_snapshot,
@@ -652,7 +933,8 @@ def _run_generate(request, team: Team):
         "min_shift_target": team.min_shift_target or None,
         "worker_default_shift": default_shift_map,
         "exempt_workers": team.exempt_names or [],
-        "rest_block": {"min": 2, "max": rest_max},
+        "rest_block": {"min": rest_min, "max": rest_max},
+        "work_block": {"min": work_run_min, "max": work_run_max},
     }
 
     def _build_req():
@@ -680,6 +962,12 @@ def _run_generate(request, team: Team):
     config = dict(base_config)
     config["worker_shift_req"] = _build_req()
     result = build_schedule(config, time_limit_seconds=30, phase2_seconds=10)
+    audit_log.info(
+        "生成排班结束 team=%s status=%s reached=%s/%s user=%s",
+        team.name, result.status,
+        sum(1 for v in result.reached.values() if v), len(result.reached),
+        request.user.username,
+    )
 
     if not result.feasible:
         # 整体无解：创建记录保存诊断信息（无排班明细）
@@ -689,7 +977,7 @@ def _run_generate(request, team: Team):
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
             rest_block={"min": 2, "max": rest_max},
-            work_window={}, worker_snapshot=worker_snapshot,
+            worker_snapshot=worker_snapshot,
             status=result.status, message=result.message, diagnostics=result.diagnostics,
         )
         return redirect("scheduler:schedule_result", pk=record.id)
@@ -701,7 +989,6 @@ def _run_generate(request, team: Team):
         min_shift_target=team.min_shift_target,
         exempt_names=team.exempt_names or [],
         rest_block={"min": 2, "max": rest_max},
-        work_window={},
         worker_snapshot=worker_snapshot,
         status=result.status,
         message=result.message,
@@ -715,7 +1002,8 @@ def _run_generate(request, team: Team):
     if old_schedules.exists():
         Assignment.objects.filter(schedule__in=old_schedules).delete()
         old_schedules.delete()
-    # 明细统一写入 Assignment 表（唯一数据源）
+    # 明细统一写入 Assignment 表（唯一数据源）。
+    # 当天实际岗位：按什么岗位上班就记什么岗位；岗位约束之外的补位人员记「普通」。
     name_map = {p.name: p for p in persons}
     assign_rows = []
     for d in range(days):
@@ -723,7 +1011,9 @@ def _run_generate(request, team: Team):
             for nm in result.per_day[d][s]:
                 p = name_map.get(nm)
                 if p:
-                    assign_rows.append(Assignment(schedule=record, person=p, day=d, shift=s))
+                    role = result.role_assignments.get((nm, d), "普通")
+                    assign_rows.append(Assignment(
+                        schedule=record, person=p, day=d, shift=s, role=role))
     Assignment.objects.bulk_create(assign_rows)
     return redirect("scheduler:schedule_result", pk=record.id)
 
@@ -746,7 +1036,8 @@ def person_edit(request, person_id):
         new_role_names = request.POST.get("new_roles", "")
         person.roles.set(Role.objects.filter(id__in=selected))
         for rn in re.split(r"[,，、\s]+", new_role_names.strip()):
-            if rn:
+            rn = (rn or "").strip()
+            if rn and len(rn) <= 50:
                 role, _ = Role.objects.get_or_create(name=rn)
                 person.roles.add(role)
         team_id = _post_int(request.POST.get("team"))
@@ -759,14 +1050,20 @@ def person_edit(request, person_id):
                 person.team = new_team
         else:
             person.team = None
-        person.default_shift = request.POST.get("default_shift") or "早班"
+        # 默认班次白名单：非法值保持原值，避免脏数据
+        ds = (request.POST.get("default_shift") or "").strip()
+        if ds in FIXED_SHIFTS:
+            person.default_shift = ds
         person.is_active = request.POST.get("is_active") == "on"
         try:
-            person.worked_so_far = max(0, int(request.POST.get("worked_so_far") or 0))
-            person.required_shifts = max(0, int(request.POST.get("required_shifts") or 0))
+            person.worked_so_far = max(0, min(999, int(request.POST.get("worked_so_far") or 0)))
+            person.required_shifts = max(0, min(999, int(request.POST.get("required_shifts") or 0)))
         except ValueError:
             pass
         person.save()
+        audit_log.info("编辑人员 person=%s team=%s shift=%s active=%s user=%s",
+                       person.name, person.team_id, person.default_shift,
+                       person.is_active, request.user.username)
         message = f"已保存「{person.name}」的信息。"
     # 岗位只显示「该人员所属队组」里出现过的岗位（并保留本人已有岗位），
     # 避免把全系统其它队组/导入误产生的无关岗位（乱码、人名等）列出来
@@ -834,11 +1131,18 @@ def person_detail(request, person_id):
                     message = f"已将{ddate:%m月%d日}的班次改为「{new_shift}」。"
                 else:
                     error = "无效的改班请求。"
+                if not error:
+                    audit_log.info("改班 user=%s person=%s schedule=%s day=%s -> %s",
+                                   request.user.username, person.name, schedule.id,
+                                   day, new_shift)
 
     start, end, days = period_range(y, m)
     assignments = {}
     if schedule:
         assignments = {a.day: a.shift for a in Assignment.objects.filter(schedule=schedule, person=person)}
+
+    if request.GET.get("export") == "xlsx":
+        return _export_person_xlsx(person, y, m, start, days, assignments)
 
     worked_auto = person_worked_auto(person, schedule)
     remaining = max(0, person.required_shifts - worked_auto)
@@ -912,6 +1216,9 @@ def shift_board(request):
                 if names:
                     board[d][s][team_name] = names
 
+    if request.GET.get("export") == "xlsx":
+        return _export_board_xlsx(y, m, start, days, board)
+
     lead = start.weekday()
     cells = [None] * lead
     for d in range(days):
@@ -974,24 +1281,36 @@ def shift_detail(request, year, month, day, shift):
             snap_by_team[sch.team.name if sch.team else "未分组"] = names
             names_today.extend(names)
 
+    # 当天实际岗位：按什么岗位上班就显示什么岗位（旧数据无岗位记录时回退为空，前端显示人员岗位）
+    role_of_day = dict(Assignment.objects.filter(
+        schedule__in=schedules, day=day, shift=shift, person__name__in=names_today
+    ).values_list("person__name", "role"))
+
     persons = {p.name: p for p in Person.objects.prefetch_related("roles").filter(name__in=names_today)}
     schedule_map = {}
     for sch in schedules:
         if sch.team_id not in schedule_map:
             schedule_map[sch.team_id] = sch
 
+    # 批量计算已上班数（一次查询，避免逐人 N+1）
+    pairs = []
+    for team_name in sorted(snap_by_team):
+        for nm in snap_by_team[team_name]:
+            p = persons.get(nm)
+            if p and p.team_id in schedule_map:
+                pairs.append((p, schedule_map[p.team_id]))
+    worked_map = _worked_auto_batch(pairs)
+
     groups = []
     for team_name in sorted(snap_by_team):
         entries = []
         for nm in snap_by_team[team_name]:
             p = persons.get(nm)
-            sch = None
-            if p and p.team_id in schedule_map:
-                sch = schedule_map[p.team_id]
             entries.append({
                 "person": p,
-                "roles": list(p.roles.values_list("name", flat=True)) if p else [],
-                "worked": person_worked_auto(p, sch) if p else 0,
+                "person_name": nm,
+                "role": role_of_day.get(nm, ""),
+                "worked": worked_map.get(p.id, p.worked_so_far) if p else 0,
                 "required": p.required_shifts if p else 0,
             })
         groups.append({"team": team_name, "entries": entries})
@@ -1042,9 +1361,12 @@ def shift_add(request, year, month, day, shift):
                 error = f"「{person.team.name}」本月还没有排班，无法加人。请先生成排班。"
             else:
                 assignment, _ = Assignment.objects.get_or_create(
-                    schedule=schedule, person=person, day=day, defaults={"shift": shift})
+                    schedule=schedule, person=person, day=day,
+                    defaults={"shift": shift, "role": "普通"})
                 assignment.shift = shift
                 assignment.save()
+                audit_log.info("加人 user=%s person=%s schedule=%s day=%s shift=%s",
+                               request.user.username, person.name, schedule.id, day, shift)
                 from urllib.parse import quote
                 return redirect(f"{request.path}?group={gid}&added={quote(person.name)}")
 
@@ -1176,7 +1498,7 @@ def schedule_list(request):
     if user_role(request) == "member":
         return redirect("scheduler:index")
     ug = user_group(request)
-    records = Schedule.objects.select_related("team")
+    records = Schedule.objects.select_related("team").order_by("-created_at")
     if ug:
         records = records.filter(team__group=ug)
     return render(request, "scheduler/schedule_list.html", {"records": records})

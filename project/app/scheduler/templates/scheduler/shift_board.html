@@ -40,6 +40,9 @@
             <input type="number" name="y" class="form-control form-control-sm" value="{{ year }}" min="2020" max="2100" style="width:90px;">
             <input type="number" name="m" class="form-control form-control-sm" value="{{ month }}" min="1" max="12" style="width:80px;">
             <button class="btn btn-sm btn-primary" type="submit">跳转</button>
+            {% if selected_group %}
+            <a class="btn btn-sm btn-outline-success" href="{% url 'scheduler:shift_board' %}?group={{ selected_group.id }}&y={{ year }}&m={{ month }}&export=xlsx">⬇ 导出 Excel</a>
+            {% endif %}
         </form>
     </div>
 </div>
