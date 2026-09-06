@@ -4,12 +4,22 @@
      #ed6f00  橙（渐变起点）
      #fbcb72  杏黄（渐变中点）
      #272b57  深蓝紫（渐变终点 / 顶栏主色）
+   说明：固定浅色主题（base_site 已强制 data-theme=light），
+         全面覆盖原生 admin 视觉元素，避免新旧样式割裂。
    ============================================================ */
 
 /* ---------- 全局渐变背景 ---------- */
+html {
+    background: #272b57 !important;
+}
 body {
     background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
     background-attachment: fixed !important;
+}
+/* 深色主题兜底（防止 data-theme 异常时大面积变黑） */
+html[data-theme="dark"] body {
+    background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
+    color: #333 !important;
 }
 
 /* ---------- 顶部标题栏：深蓝紫毛玻璃 ---------- */
@@ -30,6 +40,7 @@ body {
 #branding h1 {
     color: #ffffff !important;
     font-weight: 800;
+    font-size: 18px;
 }
 #user-tools a:hover {
     background: rgba(255, 255, 255, 0.18);
@@ -50,11 +61,17 @@ div.breadcrumbs a {
     color: #272b57 !important;
 }
 
+/* ---------- 主内容区 ---------- */
+#content {
+    padding-bottom: 40px;
+}
+
 /* ---------- 内容卡片：白色毛玻璃 ---------- */
 .module,
 .module.filtered,
 #content-main .module,
-#content-related .module {
+#content-related .module,
+fieldset.module {
     background: rgba(255, 255, 255, 0.62) !important;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
@@ -65,7 +82,7 @@ div.breadcrumbs a {
     margin-bottom: 18px;
 }
 .module h2, .module caption,
-.inline-group h2 {
+.inline-group h2, fieldset.module h2 {
     background: transparent !important;
     color: #272b57 !important;
     font-weight: 700;
@@ -101,14 +118,81 @@ input[type="submit"]:hover, .button:hover, a.button:hover {
     box-shadow: 0 5px 14px rgba(237, 111, 0, 0.45) !important;
 }
 
-/* 次要按钮（取消/删除）保留可辨识的柔和样式 */
+/* 对象工具按钮（右上角「增加/历史」）：统一渐变胶囊 */
+.object-tools a,
+.object-tools a.addlink,
+.object-tools a.historylink,
+.object-tools a.viewsitelink {
+    background: linear-gradient(90deg, #ed6f00, #fbcb72) !important;
+    color: #272b57 !important;
+    border: none !important;
+    border-radius: 18px !important;
+    font-weight: bold !important;
+    box-shadow: 0 3px 10px rgba(237, 111, 0, 0.35) !important;
+}
+.object-tools a:hover {
+    filter: brightness(1.06);
+}
+
+/* 危险操作 */
 a.deletelink, .deletelink {
     color: #b91c1c !important;
 }
 
+/* ---------- 列表页：工具栏 / 筛选侧栏 / 分页 ---------- */
+#toolbar {
+    background: rgba(255, 255, 255, 0.55) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    border-radius: 12px !important;
+    margin-bottom: 14px;
+}
+#toolbar form #searchbar {
+    background: rgba(255, 255, 255, 0.85) !important;
+}
+
+#changelist-filter {
+    background: rgba(255, 255, 255, 0.55) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    border-radius: 12px !important;
+    margin-left: 14px;
+}
+#changelist-filter h2,
+#changelist-filter h3 {
+    background: rgba(39, 43, 87, 0.85) !important;
+    color: #ffffff !important;
+    border-radius: 12px 12px 0 0;
+    padding: 8px 12px;
+}
+#changelist-filter li {
+    color: #272b57;
+}
+#changelist-filter li.selected a {
+    color: #ed6f00 !important;
+    font-weight: 700;
+}
+
+#changelist .actions,
+.paginator {
+    background: rgba(255, 255, 255, 0.5) !important;
+    border: none !important;
+    border-radius: 10px;
+}
+.paginator a, .paginator .this-page {
+    border-radius: 6px !important;
+}
+.paginator .this-page {
+    background: rgba(39, 43, 87, 0.85) !important;
+    color: #fff !important;
+}
+
 /* ---------- 表格 ---------- */
 #changelist table thead th,
-table thead th {
+table thead th,
+#changelist .results table thead th {
     background: rgba(39, 43, 87, 0.85) !important;
     color: #ffffff !important;
     border: none !important;
@@ -123,14 +207,6 @@ table tbody tr:nth-child(even),
     background: rgba(255, 255, 255, 0.25);
 }
 
-/* 操作栏 / 分页 */
-#changelist .actions,
-.paginator {
-    background: rgba(255, 255, 255, 0.5) !important;
-    border: none !important;
-    border-radius: 10px;
-}
-
 /* ---------- 登录页：居中毛玻璃卡片 ---------- */
 body.login {
     display: flex;
@@ -138,8 +214,11 @@ body.login {
     justify-content: center;
 }
 body.login #container {
-    min-width: 380px;
-    max-width: 460px;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    min-width: 400px;
+    max-width: 480px;
 }
 body.login #header {
     background: transparent !important;
@@ -159,10 +238,16 @@ body.login #content {
 }
 body.login .form-row {
     padding: 10px 0;
+    border: none !important;
 }
 body.login .form-row label {
     color: #272b57;
     font-weight: 600;
+}
+body.login .submit-row {
+    background: transparent !important;
+    border: none !important;
+    padding: 12px 0 0 !important;
 }
 
 /* ---------- 弹窗 / 内联 ---------- */

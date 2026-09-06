@@ -4,11 +4,9 @@
 {% block extrastyle %}
 {{ block.super }}
 <link rel="stylesheet" href="{% static 'admin_theme.css' %}">
+<script>document.documentElement.dataset.theme = 'light';</script>
 {% endblock %}
 
 {% block branding %}
 <div id="site-name"><a href="{% url 'admin:index' %}">⛏ 井下排班系统 · 后台管理</a></div>
-{% if user.is_anonymous %}
-{% include "admin/color_theme_toggle.html" %}
-{% endif %}
 {% endblock %}
