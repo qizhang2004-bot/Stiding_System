@@ -252,7 +252,6 @@ SSH 到服务器 → `git pull` → `pip install` → `migrate` → `collectstat
 ```bash
 SECRET_KEY=<随机密钥>
 DJANGO_SECRET_KEY=<同上>
-DB_ROOT_PASSWORD=<mysql root 密码，用于部署时自动建库授权>
 # 以下可选，默认值与 threeminutes 生产一致：
 # DB_NAME=stiding
 # DB_USER=django
@@ -260,6 +259,8 @@ DB_ROOT_PASSWORD=<mysql root 密码，用于部署时自动建库授权>
 # DB_HOST=localhost
 # DB_PORT=3306
 ```
+
+部署脚本会用 `sudo mysql`（auth_socket）自动创建 `stiding` 库并给 `django` 用户授权，无需手工建库。
 
 ### 旧 SQLite 数据迁移到 MySQL（一次性）
 
