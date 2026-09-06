@@ -438,13 +438,35 @@ def _rows_from_csv(text):
     return lines
 
 
+def _claim_account(g2: Group, role: str, username: str, password: str):
+    """新增队组时认领账号：账号不存在则创建；存在但无任何队组绑定（孤儿账号）则直接复用；
+    已绑定其他队组则拒绝并说明绑定关系。返回错误信息或 None。"""
+    existing = User.objects.filter(username=username).first()
+    if existing:
+        prof = getattr(existing, "profile", None)
+        if prof is not None:
+            gname = prof.group.name if prof.group else "未绑定队组"
+            return f"账号「{username}」已存在（绑定队组「{gname}」），请换一个账号名。"
+        # 孤儿账号（无任何绑定）：复用，重设密码并绑到新队组
+        existing.set_password(password or "111111")
+        existing.save()
+        UserProfile.objects.create(user=existing, group=g2, role=role)
+        return None
+    u = User.objects.create_user(username, password=password or "111111")
+    UserProfile.objects.create(user=u, group=g2, role=role)
+    return None
+
+
 def _upsert_group_account(g2: Group, role: str, username: str, password: str):
-    """更新/创建队组绑定账号：用户名可改；密码留空=保持原密码。返回错误信息或 None。"""
+    """编辑队组时更新/创建绑定账号：用户名可改；密码留空=保持原密码。返回错误信息或 None。"""
     profile = UserProfile.objects.filter(group=g2, role=role).select_related("user").first()
     if profile and profile.user:
         u = profile.user
         if User.objects.filter(username=username).exclude(id=u.id).exists():
-            return f"账号「{username}」已存在，请换一个账号名。"
+            other = User.objects.filter(username=username).exclude(id=u.id).first()
+            oprof = getattr(other, "profile", None)
+            oname = oprof.group.name if oprof and oprof.group else "未绑定队组"
+            return f"账号「{username}」已存在（绑定队组「{oname}」），请换一个账号名。"
         u.username = username
         if password:
             u.set_password(password)
@@ -593,19 +615,21 @@ def team_manage(request):
                     error = f"队组名称「{gname}」已存在，请换一个。"
                 elif gshort and Group.objects.filter(short_name=gshort).exists():
                     error = f"队组缩写「{gshort}」已被占用，请换一个。"
-                elif User.objects.filter(username__in=[auser, muser]).exists():
-                    dup = "、".join(u for u in (auser, muser)
-                                    if User.objects.filter(username=u).exists())
-                    error = f"账号「{dup}」已存在，请换一个账号名。"
                 else:
                     g2 = Group.objects.create(name=gname, short_name=gshort)
-                    for uname, pwd, role in ((auser, apwd, "team_admin"),
-                                             (muser, mpwd, "member")):
-                        u = User.objects.create_user(uname, password=pwd)
-                        UserProfile.objects.create(user=u, group=g2, role=role)
-                    audit_log.info("新增队组 %s admin=%s member=%s user=%s",
-                                   gname, auser, muser, request.user.username)
-                    return redirect(f"{request.path}?group={g2.id}&added_group=1")
+                    err = _claim_account(g2, "team_admin", auser, apwd)
+                    if err:
+                        g2.delete()
+                        error = err
+                    else:
+                        err2 = _claim_account(g2, "member", muser, mpwd)
+                        if err2:
+                            g2.delete()
+                            error = err2
+                        else:
+                            audit_log.info("新增队组 %s admin=%s member=%s user=%s",
+                                           gname, auser, muser, request.user.username)
+                            return redirect(f"{request.path}?group={g2.id}&added_group=1")
 
         elif action == "edit_group":
             # 超级管理员编辑队组：名称/缩写/管理员与队员账号（密码留空=不改密码）
