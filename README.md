@@ -245,7 +245,12 @@ Stiding_System/
 
 ## 部署
 
-- **自动部署**：push 到 `main` 分支触发 GitHub Actions：拉取代码 → 加载环境变量 → 安装依赖 → 幂等建库授权 → 数据库迁移 → 收集静态文件 → 重启服务。
+- **敏感配置走 GitHub Secrets**：仓库与代码中不包含任何密码/密钥。部署时由 GitHub Actions 读取 Secrets 并注入服务器：
+  1. `SERVER_HOST` / `SERVER_USER` / `SERVER_KEY` —— 服务器 SSH 连接
+  2. `SM_DB_PASSWORD` —— 数据库密码（部署时自动写入服务器环境变量文件）
+  3. `SM_DJANGO_SECRET_KEY` —— Django 生产密钥（同上）
+- **自动部署**：push 到 `main` 分支触发 GitHub Actions：拉取代码 → Secrets 写入服务器环境变量文件 → 加载环境变量 → 安装依赖 → 幂等建库授权 → 数据库迁移 → 收集静态文件 → 重启服务。
+- **本地开发**：敏感值放在项目根目录 `.env`（已被 .gitignore 排除，不会上传）。
 - **静态资源本地化**：Bootstrap / ECharts 均存放于项目内，不依赖外网 CDN。
 - **并发保护**：同一班组同一时刻只允许一个生成任务；MySQL 支持多 worker 并发读写。
 - **旧数据迁移**：从旧 SQLite 迁移到 MySQL 时，执行 `python tools/migrate_sqlite_to_mysql.py`（幂等，按依赖顺序逐表拷贝）。

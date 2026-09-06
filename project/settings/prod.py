@@ -17,8 +17,8 @@ pymysql.install_as_MySQLdb()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: 生产环境务必通过环境变量注入，勿硬编码
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "change-me-in-production")
+# SECURITY WARNING: 生产环境密钥必须通过环境变量注入（GitHub Secrets -> /etc/stiding.env）
+SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 # SECURITY WARNING: 生产环境关闭 DEBUG
 DEBUG = False
