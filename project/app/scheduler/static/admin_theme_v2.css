@@ -4,22 +4,36 @@
      #ed6f00  橙（渐变起点）
      #fbcb72  杏黄（渐变中点）
      #272b57  深蓝紫（渐变终点 / 顶栏主色）
-   说明：固定浅色主题（base_site 已强制 data-theme=light），
-         全面覆盖原生 admin 视觉元素，避免新旧样式割裂。
+   说明：固定浅色主题；整体做成「大毛玻璃浮层 + 四周露渐变」，
+         避免容器白底盖住背景造成割裂。
    ============================================================ */
 
-/* ---------- 全局渐变背景 ---------- */
+/* ---------- 全局渐变背景（四周留边露出） ---------- */
 html {
     background: #272b57 !important;
 }
 body {
     background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
     background-attachment: fixed !important;
+    padding: 18px !important;
 }
-/* 深色主题兜底（防止 data-theme 异常时大面积变黑） */
+/* 深色主题兜底 */
 html[data-theme="dark"] body {
     background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
     color: #333 !important;
+}
+
+/* ---------- 整体容器：大毛玻璃浮层 ---------- */
+#container {
+    background: rgba(255, 255, 255, 0.55) !important;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 16px 44px rgba(39, 43, 87, 0.32) !important;
+    overflow: hidden;
+    max-width: 1500px;
+    margin: 0 auto !important;
 }
 
 /* ---------- 顶部标题栏：深蓝紫毛玻璃 ---------- */
@@ -47,12 +61,47 @@ html[data-theme="dark"] body {
     border-radius: 6px;
 }
 
+/* 隐藏暗色模式切换图标（已固定浅色主题） */
+.theme-toggle, button.theme-toggle, .theme-toggle-wrap {
+    display: none !important;
+}
+
+/* ---------- 左侧导航侧栏：透明，菜单项毛玻璃 ---------- */
+#nav-sidebar {
+    background: transparent !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
+#nav-sidebar .module {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+#nav-sidebar .module h2,
+#nav-sidebar .module caption {
+    color: #272b57 !important;
+    background: rgba(255, 255, 255, 0.6) !important;
+    border-radius: 8px;
+    margin-bottom: 4px;
+}
+#nav-sidebar a {
+    color: #272b57 !important;
+    border-radius: 8px;
+    padding: 7px 12px;
+}
+#nav-sidebar a:hover {
+    background: rgba(237, 111, 0, 0.15) !important;
+}
+#nav-sidebar a.active {
+    background: rgba(39, 43, 87, 0.85) !important;
+    color: #ffffff !important;
+}
+
 /* ---------- 面包屑：半透明毛玻璃 ---------- */
 div.breadcrumbs {
     background: rgba(255, 255, 255, 0.45) !important;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
     border-radius: 10px;
     margin: 12px 0;
     color: #272b57 !important;
@@ -63,7 +112,11 @@ div.breadcrumbs a {
 
 /* ---------- 主内容区 ---------- */
 #content {
-    padding-bottom: 40px;
+    padding: 24px 30px 50px;
+}
+#content-main, #content-related {
+    float: none !important;
+    width: auto !important;
 }
 
 /* ---------- 内容卡片：白色毛玻璃 ---------- */
@@ -87,6 +140,12 @@ fieldset.module {
     color: #272b57 !important;
     font-weight: 700;
     border-bottom: 1px dashed rgba(39, 43, 87, 0.25) !important;
+}
+
+/* 主内容区大毛玻璃块（列表/表单外的包裹层） */
+#content {
+    background: rgba(255, 255, 255, 0.28) !important;
+    border-radius: 14px;
 }
 
 /* ---------- 表单控件 ---------- */
@@ -167,9 +226,7 @@ a.deletelink, .deletelink {
     border-radius: 12px 12px 0 0;
     padding: 8px 12px;
 }
-#changelist-filter li {
-    color: #272b57;
-}
+#changelist-filter li { color: #272b57; }
 #changelist-filter li.selected a {
     color: #ed6f00 !important;
     font-weight: 700;
@@ -181,9 +238,7 @@ a.deletelink, .deletelink {
     border: none !important;
     border-radius: 10px;
 }
-.paginator a, .paginator .this-page {
-    border-radius: 6px !important;
-}
+.paginator a, .paginator .this-page { border-radius: 6px !important; }
 .paginator .this-page {
     background: rgba(39, 43, 87, 0.85) !important;
     color: #fff !important;
@@ -214,9 +269,13 @@ body.login {
     justify-content: center;
 }
 body.login #container {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
+    background: rgba(255, 255, 255, 0.72) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 16px 44px rgba(39, 43, 87, 0.35) !important;
+    padding: 0 !important;
     min-width: 400px;
     max-width: 480px;
 }
@@ -228,13 +287,8 @@ body.login #header {
     padding: 20px 0 0;
 }
 body.login #content {
-    background: rgba(255, 255, 255, 0.72) !important;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.6) !important;
-    border-radius: 20px !important;
-    box-shadow: 0 16px 44px rgba(39, 43, 87, 0.35) !important;
-    padding: 28px !important;
+    background: transparent !important;
+    padding: 18px 28px 28px !important;
 }
 body.login .form-row {
     padding: 10px 0;

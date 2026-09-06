@@ -8,14 +8,14 @@ class GlassAdminMixin:
     """给所有后台页面注入「渐变色背景 + 毛玻璃」主题 CSS。"""
 
     class Media:
-        css = {"all": ("admin_theme.css",)}
+        css = {"all": ("admin_theme_v2.css",)}
 
 
 class GlassInlineMixin:
     """内联表格同样注入主题 CSS。"""
 
     class Media:
-        css = {"all": ("admin_theme.css",)}
+        css = {"all": ("admin_theme_v2.css",)}
 
 
 # ---------------------------------------------------------------------------
