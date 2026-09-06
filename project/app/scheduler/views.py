@@ -321,18 +321,94 @@ def _export_person_xlsx(person, year: int, month: int, start, days: int, assignm
 @login_required
 def index(request):
     ug = user_group(request)
-    qs = Schedule.objects.select_related("team")
-    persons_qs = Person.objects.all()
-    if ug:
-        qs = qs.filter(team__group=ug)
-        persons_qs = persons_qs.filter(team__group=ug)
-    recent = qs.order_by("-created_at")[:5]
+    role = user_role(request)
+    groups = Group.objects.order_by("name")
+
+    # 超管：?group= 点击切换队组展示（默认第一个）；队组管理员/队员固定本队组
+    selected_group = None
+    if role == "super":
+        sel = request.GET.get("group", "")
+        selected_group = groups.filter(id=sel).first() if sel.isdigit() else groups.first()
+    else:
+        selected_group = ug
+
+    y, m = current_period()
+    start, end, days = period_range(y, m)
+
+    # 折线图数据：该队组所有班组每天各班次上班人数（当前周期）
+    chart = {
+        "dates": [(start + timedelta(days=d)).strftime("%m-%d") for d in range(days)],
+        "early": [0] * days, "mid": [0] * days, "night": [0] * days, "total": [0] * days,
+    }
+    schedules = []
+    team_count = person_count = 0
+    cap_total = 0
+    shortfall = []
+    if selected_group:
+        schedules = _latest_schedules_for_month(y, m, selected_group)
+        for sch in schedules:
+            per_day, _, _ = _assignment_matrix(sch)
+            for d in range(min(days, sch.days)):
+                for s in FIXED_SHIFTS:
+                    n = len(per_day.get(d, {}).get(s, []))
+                    if s == "早班":
+                        chart["early"][d] += n
+                    elif s == "中班":
+                        chart["mid"][d] += n
+                    elif s == "晚班":
+                        chart["night"][d] += n
+                    chart["total"][d] += n
+        team_count = Team.objects.filter(group=selected_group).count()
+        person_count = Person.objects.filter(team__group=selected_group, is_active=True).count()
+        # 可达最低出勤总人数：各班组 min(启用人数, 每天人数×天数 // 最少班数) 求和
+        for team in Team.objects.filter(group=selected_group):
+            target = team.min_shift_target or 18
+            active = Person.objects.filter(team=team, is_active=True).count()
+            if team.daily_headcount > 0 and target > 0:
+                cap_total += min(active, (team.daily_headcount * days) // target)
+        # 未达最低出勤名单（除去豁免人员），基于最新排班实时计算
+        for sch in schedules:
+            exempt = set(sch.exempt_names or [])
+            target_global = sch.min_shift_target or 0
+            _, wc, _ = _assignment_matrix(sch)
+            snap = {s2["name"]: s2 for s2 in (sch.worker_snapshot or [])}
+            for nm, s2 in snap.items():
+                if nm in exempt:
+                    continue
+                if target_global > 0:
+                    tgt = target_global - s2.get("worked", 0)
+                elif s2.get("required", 0) > 0:
+                    tgt = s2["required"] - s2.get("worked", 0)
+                else:
+                    tgt = 0
+                if tgt <= 0:
+                    continue
+                cnt = wc.get(nm, 0)
+                if cnt < tgt:
+                    shortfall.append({
+                        "name": nm, "team": sch.team.name if sch.team else "—",
+                        "target": tgt, "count": cnt, "gap": tgt - cnt,
+                    })
+        shortfall.sort(key=lambda x: x["target"] - x["count"], reverse=True)
+
+    has_schedule = len(schedules) > 0
+
     return render(request, "scheduler/index.html", {
-        "recent": recent,
-        "person_count": persons_qs.count(),
-        "team_count": (Team.objects.filter(group=ug).count() if ug else Team.objects.count()),
-        "schedule_count": qs.count(),
+        "role": role,
         "user_group": ug,
+        "groups": groups,
+        "selected_group": selected_group,
+        "year": y, "month": m,
+        "start": start, "end": end, "days": days,
+        "chart": chart,
+        "has_schedule": has_schedule,
+        "team_count": team_count,
+        "person_count": person_count,
+        "schedule_count": len(schedules),
+        "cap_total": cap_total,
+        "shortfall": shortfall,
+        "recent": Schedule.objects.filter(team__group=selected_group).order_by("-created_at")[:5]
+        if selected_group else [],
     })
 
 

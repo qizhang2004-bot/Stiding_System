@@ -35,6 +35,7 @@ ALLOWED_HOSTS = [
 # Application definition
 
 INSTALLED_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -147,3 +148,7 @@ LOGGING = {
         'scheduler.audit': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
     },
 }
+
+
+# django-jazzmin 后台主题（层级菜单）
+from project.settings.jazzmin_conf import JAZZMIN_SETTINGS, JAZZMIN_UI_TWEAKS  # noqa: E402

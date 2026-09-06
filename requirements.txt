@@ -3,3 +3,4 @@ ortools>=9.10
 gunicorn>=22.0
 openpyxl>=3.1
 PyMySQL>=1.1
+django-jazzmin>=3.0
