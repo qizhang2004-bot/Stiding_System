@@ -1,0 +1,137 @@
+/* ============================================================
+   后台主题：纯渐变色背景 + 毛玻璃卡片
+   配色：
+     #ed6f00  橙（渐变起点）
+     #fbcb72  杏黄（渐变中点）
+     #272b57  深蓝紫（渐变终点 / 顶栏主色）
+   ============================================================ */
+
+/* ---------- 全局渐变背景 ---------- */
+body.grp,
+body {
+    background: linear-gradient(135deg, #ed6f00 0%, #fbcb72 45%, #272b57 100%) !important;
+    background-attachment: fixed !important;
+}
+
+/* ---------- 顶部标题栏：深蓝紫毛玻璃 ---------- */
+#grp-header {
+    background: rgba(39, 43, 87, 0.82) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.28) !important;
+    box-shadow: 0 4px 18px rgba(39, 43, 87, 0.35) !important;
+}
+#grp-header * {
+    color: #ffffff !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+#grp-navigation ul li a {
+    color: rgba(255, 255, 255, 0.92) !important;
+    border-radius: 8px !important;
+}
+#grp-navigation ul li.grp-selected a,
+#grp-navigation ul li a:hover {
+    background: rgba(255, 255, 255, 0.18) !important;
+}
+
+/* ---------- 面包屑：半透明毛玻璃 ---------- */
+#grp-breadcrumbs {
+    background: rgba(255, 255, 255, 0.45) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+    border-radius: 10px !important;
+    margin: 10px 0 !important;
+}
+#grp-breadcrumbs * { color: #272b57 !important; }
+
+/* ---------- 内容卡片：白色毛玻璃 ---------- */
+.grp-module,
+.module,
+.grp-group,
+.grp-changelist-actions,
+#grp-content .grp-module,
+.grp-content-container .grp-module {
+    background: rgba(255, 255, 255, 0.62) !important;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.55) !important;
+    border-radius: 14px !important;
+    box-shadow: 0 8px 28px rgba(39, 43, 87, 0.18) !important;
+}
+.grp-module h2,
+.grp-module-title,
+.grp-module h3 {
+    background: transparent !important;
+    color: #272b57 !important;
+    border: none !important;
+}
+
+/* ---------- 输入框 / 下拉 / 文本域：半透明白 ---------- */
+input[type="text"], input[type="password"], input[type="number"],
+input[type="email"], input[type="url"], input[type="search"],
+select, textarea, .grp-autocomplete-wrapper {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border: 1px solid rgba(39, 43, 87, 0.25) !important;
+    border-radius: 8px !important;
+}
+input[type="text"]:focus, input[type="password"]:focus,
+select:focus, textarea:focus {
+    border-color: #ed6f00 !important;
+    box-shadow: 0 0 0 3px rgba(237, 111, 0, 0.18) !important;
+}
+
+/* ---------- 按钮：橙→杏黄渐变 ---------- */
+input[type="submit"], button[type="submit"],
+.grp-button, a.grp-button, .grp-default,
+input.grp-button, button.grp-button {
+    background: linear-gradient(90deg, #ed6f00, #fbcb72) !important;
+    color: #272b57 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: bold !important;
+    box-shadow: 0 3px 10px rgba(237, 111, 0, 0.35) !important;
+}
+input[type="submit"]:hover, button[type="submit"]:hover,
+.grp-button:hover, a.grp-button:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 5px 14px rgba(237, 111, 0, 0.45) !important;
+}
+
+/* ---------- 表格 ---------- */
+.grp-table thead th {
+    background: rgba(39, 43, 87, 0.85) !important;
+    color: #ffffff !important;
+    border: none !important;
+}
+.grp-table tbody tr:hover td {
+    background: rgba(237, 111, 0, 0.08) !important;
+}
+
+/* ---------- 登录页：居中毛玻璃卡片 ---------- */
+body.login #grp-content-container {
+    max-width: 460px;
+    margin: 12vh auto !important;
+}
+body.login #grp-content {
+    background: rgba(255, 255, 255, 0.72) !important;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.6) !important;
+    border-radius: 20px !important;
+    box-shadow: 0 16px 44px rgba(39, 43, 87, 0.35) !important;
+    padding: 26px !important;
+}
+body.login #grp-content h1 {
+    color: #272b57 !important;
+    font-weight: 800 !important;
+}
+
+/* ---------- 弹层 / 内联卡片也统一 ---------- */
+.grp-inline-group, .inline-group, .grp-stacked-inline {
+    background: rgba(255, 255, 255, 0.55) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 255, 255, 0.5) !important;
+}
