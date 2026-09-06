@@ -264,23 +264,19 @@ DJANGO_SECRET_KEY=<同上>
 
 ### 旧 SQLite 数据迁移到 MySQL（一次性）
 
-在第一次拉取新版代码**之前**（旧代码还在用 SQLite 时），在服务器上执行：
+部署完成后（新代码已在服务器上、MySQL 库已自动创建），在服务器上执行一键迁移脚本，
+把旧 `project/db.sqlite3` 里的全部数据（人员/班组/排班/账号）迁入 MySQL：
 
 ```bash
 cd /home/ubuntu/Stiding_System
 source .venv/bin/activate
 export DJANGO_SETTINGS_MODULE=project.settings.prod
-python manage.py dumpdata --exclude auth.permission --exclude contenttypes --exclude sessions --exclude admin > /tmp/server_dump.json
-```
-
-然后正常部署（自动建库 + migrate），部署完成后导入旧数据：
-
-```bash
-cd /home/ubuntu/Stiding_System && source .venv/bin/activate
-export DJANGO_SETTINGS_MODULE=project.settings.prod
-python tools/import_fixture.py /tmp/server_dump.json
+python tools/migrate_sqlite_to_mysql.py
 sudo systemctl restart stiding
 ```
+
+> 该脚本清空 MySQL 中的本项目各表后，按依赖顺序从旧 SQLite 文件逐表拷贝（保持主键与外键关系），
+> 可重复执行（幂等）。若旧 SQLite 文件已不存在或不需要旧数据，可跳过此步。
 
 ### 常用运维命令
 
