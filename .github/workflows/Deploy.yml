@@ -49,6 +49,11 @@ jobs:
             # 部署环境显式使用 prod 配置
             export DJANGO_SETTINGS_MODULE=project.settings.prod
 
+            # 注入数据库等环境变量（/etc/stiding.env 由服务器运维配置）
+            set -a
+            source /etc/stiding.env 2>/dev/null || true
+            set +a
+
             # 更新Python依赖
             pip install -r requirements.txt
 

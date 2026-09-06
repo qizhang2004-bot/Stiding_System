@@ -33,7 +33,7 @@
 | 语言 | Python 3.10+ |
 | Web 框架 | Django 5+（开发环境实测 6.0） |
 | 求解器 | Google OR-Tools（CP-SAT） |
-| 数据库 | SQLite（默认，可换 MySQL） |
+| 数据库 | MySQL（utf8mb4；连接参数用环境变量配置） |
 
 依赖见 [`requirements.txt`](requirements.txt)：`Django>=5.0`、`ortools>=9.10`。
 
@@ -169,7 +169,7 @@ Stiding_System/
 ├── requirements.txt
 ├── README.md
 └── project/
-    ├── settings/dev.py            # 开发配置（SQLite）
+    ├── settings/dev.py            # 开发配置（MySQL）
     ├── urls.py
     └── app/
         ├── order/ users/          # 预留应用
@@ -204,7 +204,7 @@ Stiding_System/
 - **操作审计**：改班 / 加人 / 导入 / 编辑 / 生成排班等写操作输出到 `scheduler.audit` 日志
   （dev 输出到控制台；prod 由 gunicorn 收集到 `journalctl -u stiding -f`）。
 - **并发保护**：同一班组同一时刻只允许一个生成任务（其他请求提示"正在生成"）；
-  SQLite 已开 WAL + busy_timeout，降低多 worker 锁冲突。
+  数据库为 MySQL，支持多 worker 并发读写。
 
 ---
 
@@ -221,11 +221,11 @@ Stiding_System/
 | 项目目录 | `/home/ubuntu/Stiding_System` |
 | Python 虚拟环境 | `/home/ubuntu/Stiding_System/.venv` |
 | systemd 服务 | `/etc/systemd/system/stiding.service` |
-| 环境变量（SECRET_KEY） | `/etc/stiding.env` |
+| 环境变量（SECRET_KEY / DB） | `/etc/stiding.env` |
 | Nginx 站点配置 | `/etc/nginx/sites-available/stiding`（软链到 `sites-enabled/`） |
 | Gunicorn 配置 | 写在 systemd 服务的 `ExecStart` 里（绑 `127.0.0.1:8001`） |
 | 静态文件目录 | `/home/ubuntu/Stiding_System/project/staticfiles` |
-| SQLite 数据库 | `/home/ubuntu/Stiding_System/project/db.sqlite3` |
+| MySQL 数据库 | 服务器 MySQL 实例，库名 `stiding`（utf8mb4），连接参数见 `/etc/stiding.env` |
 | SSL 证书 / 私钥 | `/home/ubuntu/ubuntu.pem` / `/home/ubuntu/ubuntu.key`（通配符 `*.qizhang2004.cn`） |
 | 生产配置 | `project/settings/prod.py` |
 
@@ -241,6 +241,29 @@ push 到 `main` 分支会触发 GitHub Actions（`.github/workflows/Deploy.yml`�
 SSH 到服务器 → `git pull` → `pip install` → `migrate` → `collectstatic` → `systemctl restart stiding`。
 
 > 依赖 GitHub 仓库的三个 Secrets：`SERVER_HOST`、`SERVER_USER`、`SERVER_KEY`。
+
+### MySQL 数据库准备（服务器）
+
+服务器需要安装 MySQL 并创建数据库与账号（一次性的）：
+
+```bash
+sudo mysql -e "CREATE DATABASE IF NOT EXISTS stiding CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'stiding'@'localhost' IDENTIFIED BY '<密码>';
+GRANT ALL PRIVILEGES ON stiding.* TO 'stiding'@'localhost';
+GRANT ALL PRIVILEGES ON test_stiding.* TO 'stiding'@'localhost';
+GRANT CREATE ON *.* TO 'stiding'@'localhost';
+FLUSH PRIVILEGES;"
+```
+
+在 `/etc/stiding.env` 中配置连接参数（systemd 与部署脚本都会加载）：
+
+```bash
+DB_NAME=stiding
+DB_USER=stiding
+DB_PASSWORD=<密码>
+DB_HOST=127.0.0.1
+DB_PORT=3306
+```
 
 ### 常用运维命令
 

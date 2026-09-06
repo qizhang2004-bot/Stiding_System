@@ -19,6 +19,7 @@
         {% endfor %}
         <button type="button" class="btn btn-sm btn-outline-success ms-2" data-bs-toggle="modal" data-bs-target="#addGroupModal">＋ 新增队组</button>
         {% if selected_group %}
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" data-bs-toggle="modal" data-bs-target="#editGroupModal">✏ 编辑队组</button>
         <button type="button" class="btn btn-sm btn-outline-danger ms-2" data-bs-toggle="modal" data-bs-target="#delGroupModal">🗑 删除队组</button>
         {% endif %}
     </div>
@@ -80,6 +81,60 @@
         </div>
     </div>
 </div>
+
+<!-- 编辑队组弹窗（超管）：改名称/缩写/账号，密码留空=不改 -->
+{% if is_super and selected_group %}
+<div class="modal fade" id="editGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="border-radius:18px;">
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="edit_group">
+                <input type="hidden" name="group_id" value="{{ selected_group.id }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">✏ 编辑队组「{{ selected_group.name }}」</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队组名称</label>
+                            <input type="text" name="group_name" class="form-control" value="{{ selected_group.name }}" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队组缩写</label>
+                            <input type="text" name="group_short" class="form-control" value="{{ selected_group.short_name }}">
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队组管理员账号</label>
+                            <input type="text" name="admin_username" class="form-control" value="{{ selected_group.admin_username }}" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">管理员新密码（留空不改）</label>
+                            <input type="text" name="admin_password" class="form-control" placeholder="留空=保持原密码">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队员查看账号</label>
+                            <input type="text" name="member_username" class="form-control" value="{{ selected_group.member_username }}" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">队员新密码（留空不改）</label>
+                            <input type="text" name="member_password" class="form-control" placeholder="留空=保持原密码">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">保存修改</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <!-- 删除队组确认弹窗（超管）：必须输入「删除」两个字 -->
 {% if is_super and selected_group %}

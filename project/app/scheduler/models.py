@@ -22,6 +22,18 @@ class Group(models.Model):
         """队组下所有班组的人员总数（用于管理页统计展示）。"""
         return Person.objects.filter(team__group=self).count()
 
+    @property
+    def admin_username(self):
+        """队组管理员登录账号（无则空串）。"""
+        p = self.profiles.filter(role="team_admin").select_related("user").first()
+        return p.user.username if p else ""
+
+    @property
+    def member_username(self):
+        """队员只读登录账号（无则空串）。"""
+        p = self.profiles.filter(role="member").select_related("user").first()
+        return p.user.username if p else ""
+
     def __str__(self):
         return self.name
 

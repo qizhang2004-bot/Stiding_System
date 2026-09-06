@@ -438,6 +438,25 @@ def _rows_from_csv(text):
     return lines
 
 
+def _upsert_group_account(g2: Group, role: str, username: str, password: str):
+    """更新/创建队组绑定账号：用户名可改；密码留空=保持原密码。返回错误信息或 None。"""
+    profile = UserProfile.objects.filter(group=g2, role=role).select_related("user").first()
+    if profile and profile.user:
+        u = profile.user
+        if User.objects.filter(username=username).exclude(id=u.id).exists():
+            return f"账号「{username}」已存在，请换一个账号名。"
+        u.username = username
+        if password:
+            u.set_password(password)
+        u.save()
+        return None
+    if User.objects.filter(username=username).exists():
+        return f"账号「{username}」已存在，请换一个账号名。"
+    u = User.objects.create_user(username, password=password or "111111")
+    UserProfile.objects.create(user=u, group=g2, role=role)
+    return None
+
+
 def _save_team_constraints(request, team) -> Tuple[str, str]:
     """把「排班约束」表单写入班组。返回 (warn 片段, 错误信息)。
 
@@ -534,6 +553,8 @@ def team_manage(request):
         message = f"班组已重命名为「{request.GET['renamed']}」。"
     if request.GET.get("added_group"):
         message = "已新增队组，队组管理员与队员账号已创建。"
+    if request.GET.get("edited_group"):
+        message = "队组信息与账号已更新。"
     if request.GET.get("deleted_group"):
         message = f"已删除队组「{request.GET['deleted_group']}」（其下班组与绑定账号一并删除）。"
     if request.GET.get("saved") and default_team:
@@ -566,10 +587,16 @@ def team_manage(request):
                     error = "请填写队组管理员账号和密码。"
                 elif not muser or not mpwd:
                     error = "请填写队员查看账号和密码。"
+                elif auser == muser:
+                    error = "队组管理员账号与队员账号不能相同。"
                 elif Group.objects.filter(name=gname).exists():
-                    error = f"队组「{gname}」已存在。"
+                    error = f"队组名称「{gname}」已存在，请换一个。"
+                elif gshort and Group.objects.filter(short_name=gshort).exists():
+                    error = f"队组缩写「{gshort}」已被占用，请换一个。"
                 elif User.objects.filter(username__in=[auser, muser]).exists():
-                    error = "账号已存在，请换一个账号名。"
+                    dup = "、".join(u for u in (auser, muser)
+                                    if User.objects.filter(username=u).exists())
+                    error = f"账号「{dup}」已存在，请换一个账号名。"
                 else:
                     g2 = Group.objects.create(name=gname, short_name=gshort)
                     for uname, pwd, role in ((auser, apwd, "team_admin"),
@@ -579,6 +606,46 @@ def team_manage(request):
                     audit_log.info("新增队组 %s admin=%s member=%s user=%s",
                                    gname, auser, muser, request.user.username)
                     return redirect(f"{request.path}?group={g2.id}&added_group=1")
+
+        elif action == "edit_group":
+            # 超级管理员编辑队组：名称/缩写/管理员与队员账号（密码留空=不改密码）
+            gid = _post_int(request.POST.get("group_id"))
+            g2 = Group.objects.filter(id=gid).first() if gid else None
+            if user_role(request) != "super":
+                error = "只有超级管理员可以编辑队组。"
+            elif not g2:
+                error = "队组不存在或已被删除。"
+            else:
+                gname = (request.POST.get("group_name") or "").strip()
+                gshort = (request.POST.get("group_short") or "").strip()
+                auser = (request.POST.get("admin_username") or "").strip()
+                apwd = request.POST.get("admin_password") or ""
+                muser = (request.POST.get("member_username") or "").strip()
+                mpwd = request.POST.get("member_password") or ""
+                if not gname or len(gname) > 50:
+                    error = "请填写队组名称（不超过 50 字）。"
+                elif not auser or not muser:
+                    error = "请填写队组管理员账号与队员账号。"
+                elif auser == muser:
+                    error = "队组管理员账号与队员账号不能相同。"
+                elif Group.objects.filter(name=gname).exclude(id=g2.id).exists():
+                    error = f"队组名称「{gname}」已存在，请换一个。"
+                elif gshort and Group.objects.filter(short_name=gshort).exclude(id=g2.id).exists():
+                    error = f"队组缩写「{gshort}」已被占用，请换一个。"
+                else:
+                    err = _upsert_group_account(g2, "team_admin", auser, apwd)
+                    if err:
+                        error = err
+                    err2 = _upsert_group_account(g2, "member", muser, mpwd) if not error else None
+                    if err2:
+                        error = err2
+                if not error:
+                    g2.name = gname
+                    g2.short_name = gshort
+                    g2.save()
+                    audit_log.info("编辑队组 %s admin=%s member=%s user=%s",
+                                   gname, auser, muser, request.user.username)
+                    return redirect(f"{request.path}?group={g2.id}&edited_group=1")
 
         elif action == "delete_group":
             # 超级管理员删除队组：需输入「删除」二次确认；连带删除其下班组与绑定账号
