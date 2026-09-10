@@ -8,10 +8,12 @@ DEFAULT_TEAMS = ["检修班", "运输班", "生产一班", "生产二班", "生�
 
 
 class Group(models.Model):
-    """队组：综掘五队 / 综掘二队（登录与权限的作用域，一个队组下有多个班组）。"""
+    """队组：综掘五队 / 综掘二队（登录与权限的作用域，一个队组下有多个班组）。
+
+    登录账号由「队组管理员账号 / 队员查看账号」两个字段单独管理
+    （见 UserProfile，一个账号绑定一个队组），本表不再保存登录缩写。
+    """
     name = models.CharField("队组名称", max_length=50, unique=True)
-    short_name = models.CharField("队员登录缩写", max_length=50, unique=True, blank=True,
-        help_text="队员登录用的账号（如 综掘五队 -> zjwd）")
 
     class Meta:
         verbose_name = "队组"
@@ -25,13 +27,13 @@ class Group(models.Model):
     @property
     def admin_username(self):
         """队组管理员登录账号（无则空串）。"""
-        p = self.profiles.filter(role="team_admin").select_related("user").first()
+        p = self.profiles.filter(role="team_admin").select_related("user").order_by("id").first()
         return p.user.username if p else ""
 
     @property
     def member_username(self):
         """队员只读登录账号（无则空串）。"""
-        p = self.profiles.filter(role="member").select_related("user").first()
+        p = self.profiles.filter(role="member").select_related("user").order_by("id").first()
         return p.user.username if p else ""
 
     def __str__(self):
@@ -41,7 +43,7 @@ class Group(models.Model):
 class Team(models.Model):
     """班组：检修班 / 运输班 / 生产一班 / 生产二班 / 生产三班（归属某个队组）。
 
-    每个班组保存自己的排班约束（1.1~1.4）。
+    每个班组保存自己的排班约束（1.1~1.5）。
     """
     group = models.ForeignKey(
         Group, null=True, blank=True, on_delete=models.SET_NULL,
@@ -51,10 +53,6 @@ class Team(models.Model):
 
     # 1.1 该班应上人数（每天下井总人数）
     daily_headcount = models.IntegerField("该班应上人数（每天）", default=0)
-
-    # 1.1b 每个班次每天的人数（早班/中班/晚班各多少人，如 {"早班":3,"中班":5,"夜班":4}）
-    #      填了则按每班精确人数排班，优先于 daily_headcount
-    shift_demand = models.JSONField("每班每天人数", default=dict)
 
     # 1.2 固定岗位应上人数 {"电工":{"op":">=","count":2}}
     role_reqs = models.JSONField("固定岗位应上人数", default=dict)
@@ -66,6 +64,11 @@ class Team(models.Model):
     min_shift_target = models.IntegerField("每人应上最少班数", default=18)
     exempt_names = models.JSONField("豁免人员", default=list)
 
+    # 1.5 专人专项约束：逐人覆盖上面的「连休范围」与「最少上班天数」。
+    #     格式 {"姓名": {"rest_min": 3, "rest_max": 4, "work_days": 20}}
+    #     该人的要求完全取代班组默认值（不是取交集）；未填的项沿用默认。
+    person_overrides = models.JSONField("专人专项约束", default=dict)
+
     class Meta:
         verbose_name = "班组"
         verbose_name_plural = "班组"
@@ -73,7 +76,6 @@ class Team(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class Role(models.Model):
     """岗位（工种），如 电工 / 班长 / 皮带。"""
@@ -137,7 +139,6 @@ class Schedule(models.Model):
 
     # 班次与每班人数（固定为 早班/中班/晚班；若用 daily_total 则逐班人数可为空）
     shifts = models.JSONField("班次列表", default=list)
-    shift_demand = models.JSONField("每班每天人数", default=dict)
     daily_total = models.IntegerField("每天下井总人数", null=True, blank=True)
 
     # 岗位人数条件 {"电工":{"op":">=","count":2}}  op: >= / <= / ==
@@ -147,8 +148,10 @@ class Schedule(models.Model):
     min_shift_target = models.IntegerField("最少出勤班数", default=18)
     exempt_names = models.JSONField("豁免人员名单", default=list)
 
-    # 休息规则
+    # 休息规则（快照）
     rest_block = models.JSONField("连休规则", default=dict)   # {"min":2,"max":4}
+    # 专人专项约束快照 {姓名: {"rest_min":3,"rest_max":4,"work_days":20}}
+    person_overrides = models.JSONField("专人专项约束", default=dict)
 
     # 求解时的人员快照（防止以后改人员导致旧结果对不上）
     worker_snapshot = models.JSONField("人员快照", default=list)
@@ -174,7 +177,6 @@ class Schedule(models.Model):
     def __str__(self):
         team = f"{self.team.name} " if self.team else ""
         return f"{team}{self.year}-{self.month:02d} 排班"
-
 
 class Assignment(models.Model):
     """某次排班中，某个人某天上的班次（用于个人日历的展示与改班）。"""
