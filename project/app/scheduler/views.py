@@ -1046,15 +1046,32 @@ def team_manage(request):
     ]
 
     # 容量预估（提示最多能有多少人排满，需要豁免几人；只统计启用人员）
+    # 关键：必须先给「专人专项」的人留够他们要求的班次，剩下的才能分给普通人，
+    # 否则会忽略专项占用、把豁免人数算少（例如 25 人 3 个专项 19 班时，
+    # 忽略专项会算出「只差 1 人」，实际是差 2 人）。
     capacity = None
+    special_days = [r["work_days"] for r in override_rows if r["work_days"] > 0]
+    capacity_group = None
     if default_team:
         people_count = Person.objects.filter(team=default_team, is_active=True).count()
         exempt_count = len([n for n in (default_team.exempt_names or []) if
                             Person.objects.filter(team=default_team, name=n, is_active=True).exists()])
+        # 已豁免的人不参与「最少班数」约束，也不算进专项占用
+        exempt_active = {n for n in (default_team.exempt_names or [])}
+        special_days = [r["work_days"] for r in override_rows
+                        if r["work_days"] > 0 and r["name"] not in exempt_active]
         capacity = capacity_analysis(
             people_count, default_team.daily_headcount or 0, period_days,
             default_rest_max, cap_target, exempt_count,
+            special_days=special_days,
         )
+        capacity_group = {
+            "totalPeople": people_count,
+            "daily": default_team.daily_headcount or 0,
+            "special": [{"name": r["name"], "days": r["work_days"]} for r in override_rows],
+            "exempt": sorted(exempt_active),
+            "target": cap_target,
+        }
 
     # 每个岗位的持有人数（用于实时"岗位条件可行性"检查；只统计启用人员）
     role_holder_counts = {}
@@ -1084,6 +1101,8 @@ def team_manage(request):
         "rest_defaults": rest_defaults,
         "override_rows": override_rows,
         "active_person_names": sorted(active_names),
+        "capacity_group": capacity_group,
+        "exempt_names_json": sorted(exempt_active) if default_team else [],
         "capacity": capacity,
         "period_days": period_days,
         "is_team_user": ug is not None,

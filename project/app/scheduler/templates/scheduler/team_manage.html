@@ -592,6 +592,7 @@
 {% block scripts %}
 {{ role_holder_counts|json_script:"holdersData" }}
 {{ active_person_names|json_script:"activePersonsData" }}
+{{ exempt_names_json|json_script:"exemptData" }}
 <script>
 // ---- 专人专项约束：点击「+ 添加」增加一行，可从下拉里选本班组任意人员 ----
 const ACTIVE_PERSONS = JSON.parse(document.getElementById('activePersonsData')?.textContent || '[]');
@@ -648,6 +649,13 @@ ovRowList().forEach(row => {
 });
 overrideRows?.addEventListener('change', function (e) {
     if (e.target.matches('select[name="ov_person"]')) refreshOverrideOptions();
+});
+// 专人专项的人员/班数变化会影响容量估算，需重算
+overrideRows?.addEventListener('input', function (e) {
+    if (e.target.matches('input[name="ov_work_days"]')) liveCheck();
+});
+overrideRows?.addEventListener('change', function (e) {
+    if (e.target.matches('select[name="ov_person"]')) liveCheck();
 });
 // ---- 按岗位筛选（可多选） ----
 const filterAll = document.getElementById('filterAll');
@@ -727,6 +735,9 @@ document.getElementById('addRole').addEventListener('click', function () {
 const DAYS = {{ period_days }};
 const HOLDERS = JSON.parse(document.getElementById('holdersData').textContent);
 const TOTAL_PEOPLE = {{ active_person_count }};
+// 已勾选为豁免的人：他们不参与「最少班数」约束，容量估算里要排除
+const EXEMPT_NAMES = new Set(
+    JSON.parse(document.getElementById('exemptData')?.textContent || '[]'));
 function liveCheck() {
     const headcount = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
     const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
@@ -736,21 +747,52 @@ function liveCheck() {
 
     const daily = headcount;
 
-    // 总容量：本周期一共多少个班次，最多能有多少人上满“最少班数”，差几个就需豁免几个
+    // 容量估算：**先给专人专项的人留够他们的班次**，剩下的再分给普通人，
+    // 否则会忽略专项占用、把豁免人数算少。
+    //   专项占用   = Σ(各专项人员要求的最少班数)
+    //   普通可用   = 周期总班次 − 专项占用
+    //   能排满的普通人数 = floor(普通可用 ÷ 每人最少班数)
+    //   豁免人数   = 总人数 − 专项人数 − 能排满的普通人数
+    const specials = [...document.querySelectorAll('#overrideRows .input-group')]
+        .filter(r => r.id !== 'newOverrideRow')
+        .map(r => {
+            const nm = r.querySelector('select[name="ov_person"]')?.value;
+            const d = parseInt(r.querySelector('input[name="ov_work_days"]')?.value) || 0;
+            return { name: nm, days: d };
+        })
+        .filter(s => s.name && s.days > 0 && !EXEMPT_NAMES.has(s.name));
+
     if (daily > TOTAL_PEOPLE) {
         elCap.innerHTML = '<span class="text-danger fw-semibold">⚠ 每天应上人数 ' + daily +
             ' 人 大于启用人数 ' + TOTAL_PEOPLE + ' 人，无法排班（每人每天最多上 1 班）。请降低每天人数或增加启用人员。</span>';
     } else if (daily > 0 && target > 0) {
         const total = daily * DAYS;
-        const maxFill = Math.min(TOTAL_PEOPLE, Math.floor(total / target));
+        const specTotal = specials.reduce((a, s) => a + s.days, 0);
+        const normalAvailable = Math.max(0, total - specTotal);
+        const normalCount = Math.max(0, TOTAL_PEOPLE - specials.length);
+        // 所有人都有专项要求时，退化用专项里最小的要求当除数
+        const divisor = normalCount > 0 ? target : (specials.length ? Math.min(...specials.map(s => s.days)) : target);
+        const fillNormal = divisor > 0
+            ? Math.min(normalCount, Math.floor(normalAvailable / divisor)) : normalCount;
+        const maxFill = Math.min(TOTAL_PEOPLE, specials.length + fillNormal);
         const need = Math.max(0, TOTAL_PEOPLE - maxFill);
-        elCap.innerHTML = '本周期共 <b>' + total + '</b> 个班次（每天 ' + daily + ' 人 × ' + DAYS + ' 天）。' +
-            '每人上满 <b>' + target + '</b> 班才算达标，' + total + ' 个班次最多只够 <b>' + maxFill +
-            '</b> 人上满' +
-            (need > 0
-                ? '，本班共 ' + TOTAL_PEOPLE + ' 人，因此有 <span class="text-danger fw-semibold">' + need +
-                  ' 人必然排不满，需要设为豁免</span>。'
-                : '，本班 ' + TOTAL_PEOPLE + ' 人，<span class="text-success">全员都能上满</span>。');
+
+        let html = '本周期共 <b>' + total + '</b> 个班次（每天 ' + daily + ' 人 × ' + DAYS + ' 天）。';
+        if (specials.length > 0) {
+            html += '其中专人专项占用 <b>' + specTotal + '</b> 个班次（' +
+                specials.map(s => s.name + ' ' + s.days + ' 班').join('、') + '），' +
+                '剩余 <b>' + normalAvailable + '</b> 个班次给其余 ' + normalCount + ' 人。';
+        }
+        html += '每人上满 <b>' + divisor + '</b> 班才算达标，最多只够 <b>' + maxFill + '</b> 人上满。';
+        html += need > 0
+            ? '本班共 ' + TOTAL_PEOPLE + ' 人，因此有 <span class="text-danger fw-semibold">' + need +
+              ' 人必然排不满，需要设为豁免</span>。'
+            : '本班 ' + TOTAL_PEOPLE + ' 人，<span class="text-success">全员都能上满</span>。';
+        html += '<div class="text-muted-light mt-1">公式：(' + total + ' − ' + specTotal + ') ÷ ' + divisor +
+            ' = ' + (divisor > 0 ? (normalAvailable / divisor).toFixed(3) : '—') +
+            '，向下取整 <b>' + fillNormal + '</b> 人；' + TOTAL_PEOPLE + ' − ' + specials.length + ' − ' +
+            fillNormal + ' = <b>' + need + '</b> 人需豁免。</div>';
+        elCap.innerHTML = html;
     } else {
         elCap.innerHTML = '请填写「每天应上人数」和「每人应上最少班数」。';
     }

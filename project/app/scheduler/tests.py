@@ -561,3 +561,62 @@ class EffectiveScheduleSelectionTests(TestCase):
         good = self._mk("OPTIMAL", with_assignments=True)
         from .views import _schedule_for
         self.assertEqual(_schedule_for(self.person, 2026, 8).id, good.id)
+
+
+class ExemptEstimateTests(TestCase):
+    """回归：容量估算必须先扣掉「专人专项」占用的班次，否则豁免人数会算少。
+
+    原实现用 floor(总班次 ÷ 目标) 直接当「能排满的人数」，完全忽略专人专项。
+    例：25 人、434 班、3 人各 19 班、其余每人 18 班
+        旧算法 floor(434/18)=24 → 说「差 1 人」
+        正确   (434−57)÷18=20.94 → 20 人 → 25−3−20 = 2 人需豁免
+    """
+
+    def test_special_days_are_deducted_first(self):
+        from .scheduling import estimate_exempt_count
+        r = estimate_exempt_count(25, 434, 18, [19, 19, 19])
+        self.assertEqual(r["special_total"], 57)
+        self.assertEqual(r["normal_available"], 377)
+        self.assertEqual(r["fillable_normal"], 20)      # floor(377/18)
+        self.assertEqual(r["needed_exempt"], 2)         # 25 − 3 − 20
+
+    def test_matches_user_scenario_min21_special22(self):
+        from .scheduling import estimate_exempt_count
+        r = estimate_exempt_count(25, 434, 21, [22, 22, 22])
+        self.assertEqual(r["special_total"], 66)
+        self.assertEqual(r["normal_available"], 368)
+        self.assertEqual(r["fillable_normal"], 17)      # floor(368/21)
+        self.assertEqual(r["needed_exempt"], 5)         # 25 − 3 − 17
+
+    def test_no_exempt_needed_when_capacity_is_enough(self):
+        from .scheduling import estimate_exempt_count
+        r = estimate_exempt_count(25, 465, 18, [19, 19, 19])   # 每天 15 人
+        self.assertEqual(r["fillable_normal"], 22)
+        self.assertEqual(r["needed_exempt"], 0)         # 不会出现负数
+
+    def test_without_special_still_works(self):
+        from .scheduling import estimate_exempt_count
+        r = estimate_exempt_count(25, 434, 18, [])
+        self.assertEqual(r["special_total"], 0)
+        self.assertEqual(r["fillable_normal"], 24)      # floor(434/18)
+        self.assertEqual(r["needed_exempt"], 1)
+
+    def test_all_special_falls_back_to_smallest_requirement(self):
+        """所有人都有专项要求时，除数退化为专项里最小的要求，不应除零。"""
+        from .scheduling import estimate_exempt_count
+        r = estimate_exempt_count(3, 90, 0, [20, 20, 20])
+        self.assertEqual(r["normal_count"], 0)
+        self.assertEqual(r["divisor"], 20)
+        self.assertEqual(r["needed_exempt"], 0)
+
+    def test_capacity_analysis_accepts_special_days_list(self):
+        """capacity_analysis 接受 list（内部转 tuple 供缓存），且口径一致。"""
+        from .scheduling import capacity_analysis
+        r = capacity_analysis(25, 14, 31, 5, 21, 5, special_days=[22, 22, 22])
+        self.assertEqual(r["total"], 434)
+        self.assertEqual(r["special_total"], 66)
+        self.assertEqual(r["fillable_normal"], 17)
+        self.assertEqual(r["needed_exempt"], 5)
+        # 再调一次走缓存，结果必须一致
+        r2 = capacity_analysis(25, 14, 31, 5, 21, 5, special_days=[22, 22, 22])
+        self.assertEqual(r2["needed_exempt"], 5)

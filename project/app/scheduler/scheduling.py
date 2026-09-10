@@ -249,10 +249,84 @@ def capacity_quick(people: int, daily: int, days: int, rest_max: int = 4,
     }
 
 
+def estimate_exempt_count(people: int, total_shifts: int, target: int,
+                          special_days: Optional[List[int]] = None) -> dict:
+    """估算「基本豁免人数」（纯算术，秒开）。
+
+    思路（先给专人专项的人留够他们的班次，剩下的再分给普通人）：
+
+        专人专项占用 = Σ(各专项人员要求的最少班数)
+        普通可用班次 = 周期总班次 − 专人专项占用
+        能排满的普通人数 = floor(普通可用班次 ÷ 每人最少班数)
+        豁免人数 = 总人数 − 专项人数 − 能排满的普通人数
+
+    例：总 434 班、3 人各 19 班、其余每人 18 班
+        专项占用 57 → 普通可用 377 → floor(377/18)=20 → 25−3−20 = 2 人需豁免。
+
+    注意（边界）：
+      * 若所有人都有专项要求，则按专项里最小的那个要求作为除数；
+      * 结果是「必要条件」估算：受连休/连续上班规则限制，某些班数本身排不出来
+        （见 reachable_work_days_bounded），实际可能需要多豁免几人。
+
+    返回 total_shifts / special_total / normal_available / fillable_normal /
+         special_count / needed_exempt。
+    """
+    special_days = [int(x) for x in (special_days or []) if int(x) > 0]
+    special_count = len(special_days)
+    special_total = sum(special_days)
+    normal_count = max(0, people - special_count)
+    normal_available = max(0, int(total_shifts) - special_total)
+    # 除数：有普通人的话用统一目标；否则退化用专项里最小的要求
+    divisor = target if normal_count > 0 else (min(special_days) if special_days else target)
+    if divisor and divisor > 0:
+        fillable_normal = normal_available // divisor
+    else:
+        fillable_normal = normal_count
+    fillable_normal = max(0, min(normal_count, fillable_normal))
+    needed = max(0, normal_count - fillable_normal)
+    return {
+        "total_shifts": int(total_shifts),
+        "special_count": special_count,
+        "special_total": special_total,
+        "normal_count": normal_count,
+        "normal_available": normal_available,
+        "divisor": divisor,
+        "fillable_normal": fillable_normal,
+        "needed_exempt": needed,
+    }
+
+
 @lru_cache(maxsize=512)
+def _capacity_analysis_cached(people: int, daily: int, days: int,
+                              rest_max: int = 4, target: int = 18,
+                              exempt_count: int = 0, rest_min: int = 2,
+                              special_days: Tuple[int, ...] = ()) -> dict:
+    """capacity_analysis 的带缓存实现（参数必须是可哈希的，故 special_days 用 tuple）。"""
+    base = capacity_quick(people, daily, days, rest_max, target, rest_min)
+    # 先给专人专项的人留够班次，剩下的再分给普通人（忽略专项会低估豁免人数）
+    est = estimate_exempt_count(people, base["total"], target, special_days)
+    if target > base["max_work"] and not special_days:
+        # 目标班数超过周期天数，没人能满
+        max_fillable = 0
+        needed = people
+    else:
+        max_fillable = est["special_count"] + est["fillable_normal"]
+        max_fillable = max(0, min(people, max_fillable))
+        needed = max(0, people - max_fillable)
+    return {
+        "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
+        "max_fillable": max_fillable, "needed_exempt": needed,
+        "people": people, "daily": daily, "target": target,
+        "special_count": est["special_count"], "special_total": est["special_total"],
+        "normal_count": est["normal_count"], "normal_available": est["normal_available"],
+        "fillable_normal": est["fillable_normal"], "divisor": est["divisor"],
+    }
+
+
 def capacity_analysis(people: int, daily: int, days: int,
                       rest_max: int = 4, target: int = 18, exempt_count: int = 0,
-                      rest_min: int = 2) -> dict:
+                      rest_min: int = 2,
+                      special_days: Optional[List[int]] = None) -> dict:
     """容量预估：按人数、每天应上人数、周期天数等计算最多能满班几人、需要豁免几人。
 
     参数:
@@ -263,32 +337,29 @@ def capacity_analysis(people: int, daily: int, days: int,
         target       每人应上最少班数（默认 18）
         exempt_count 已豁免人数（豁免人员不参与休息计算，可上 0 班）
         rest_min     连休最小天数（默认 2，即禁止单休）
+        special_days 「专人专项」人员各自要求的最少班数列表，例如 [19, 19, 19]。
+                     这些班次要先从总班次里扣掉，剩下的才轮到普通人，
+                     否则会忽略专项占用、把豁免人数算少。
 
     返回:
-        total        周期总班次 = daily * days
-        min_work     连休规则限定的每人最少班数（仅非豁免人员）
-        max_work     每人最多班数（= 周期天数，无额外窗口限制）
-        max_fillable 最多能有多少人排满 target
-        needed_exempt 还需要豁免多少人（否则会有人排不满）
+        total           周期总班次 = daily * days
+        min_work        连休规则限定的每人最少班数（仅非豁免人员）
+        max_work        每人最多班数（= 周期天数，无额外窗口限制）
+        special_total   专人专项占用的班次
+        normal_available 扣掉专项后、可分配给普通人的班次
+        max_fillable    最多能有多少人排满
+        needed_exempt   还需要豁免多少人（否则会有人排不满）
 
-    这里用「纯算术」快速估算（不再跑 CP-SAT，页面秒开）：
-        最多能满 = floor(总班次 / 目标班数)
-        需豁免   = 总人数 - 最多能满
-    例：每天 13 人 × 31 天 = 403 班，目标 18 班 → 最多能满 22 人，25 人需豁免 3 人。
+    用「纯算术」估算（不跑 CP-SAT，页面秒开），口径见 estimate_exempt_count：
+        (总班次 − 专项占用) ÷ 每人最少班数，向下取整 = 能排满的普通人数
+        豁免人数 = 总人数 − 专项人数 − 能排满的普通人数
+    例：25 人、434 班、3 人各 19 班、其余每人 18 班
+        (434−57) ÷ 18 = 20.94 → 20 人；25 − 3 − 20 = 2 人需豁免。
     """
-    base = capacity_quick(people, daily, days, rest_max, target, rest_min)
-    # 快速公式（纯计算，秒开）
-    if target > base["max_work"]:
-        # 目标班数超过周期天数，没人能满
-        max_fillable = 0
-    else:
-        max_fillable = (base["total"] // target) if target > 0 else people
-        max_fillable = max(0, min(people, max_fillable))
-    return {
-        "total": base["total"], "min_work": base["min_work"], "max_work": base["max_work"],
-        "max_fillable": max_fillable, "needed_exempt": max(0, people - max_fillable),
-        "people": people, "daily": daily, "target": target,
-    }
+    return _capacity_analysis_cached(
+        people, daily, days, rest_max, target, exempt_count, rest_min,
+        tuple(int(x) for x in (special_days or [])),
+    )
 
 
 def _work_run_bounds(days: int, rest_min: int) -> Dict[str, int]:
