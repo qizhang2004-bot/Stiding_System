@@ -555,11 +555,48 @@ def _upsert_group_account(g2: Group, role: str, username: str, password: str):
     return None
 
 
+def _int_or(value, default: int) -> int:
+    """把表单值安全转成 int，失败返回 default。"""
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_person_overrides(request, team) -> dict:
+    """解析「专人专项约束」表单，返回 {姓名: {"rest_min":int,"rest_max":int,"work_days":int}}。
+
+    - 只保留本班组真实存在的启用人员（防止越权/脏数据）
+    - 同一人重复填写时以最后一行为准
+    - 姓名留空的行直接忽略（前端「点击添加一行」会新增空行）
+    - 连休最小值强制 ≥ 2（禁止单休），上限不小于下限
+    - 最少上班天数 0 表示该项沿用班组默认
+    """
+    names = request.POST.getlist("ov_person")
+    rmins = request.POST.getlist("ov_rest_min")
+    rmaxs = request.POST.getlist("ov_rest_max")
+    works = request.POST.getlist("ov_work_days")
+    if not names:
+        return {}
+    valid = set(Person.objects.filter(
+        team=team, is_active=True).values_list("name", flat=True))
+    out = {}
+    for i, raw_name in enumerate(names):
+        nm = (raw_name or "").strip()
+        if not nm or nm not in valid:
+            continue
+        rmin = max(2, _int_or(rmins[i] if i < len(rmins) else None, 2))
+        rmax = max(rmin, _int_or(rmaxs[i] if i < len(rmaxs) else None, rmin))
+        work = max(0, _int_or(works[i] if i < len(works) else None, 0))
+        out[nm] = {"rest_min": rmin, "rest_max": rmax, "work_days": work}
+    return out
+
+
 def _save_team_constraints(request, team) -> Tuple[str, str]:
     """把「排班约束」表单写入班组。返回 (warn 片段, 错误信息)。
 
     含字段级审核：数字非法、岗位条件 op 白名单、连休最小值钳到 2、
-    豁免名单只保留本班组真实人员。
+    豁免名单只保留本班组真实人员、专人专项只保留本班组启用人员。
     """
     try:
         daily_headcount = max(0, int(request.POST.get("daily_headcount") or 0))
@@ -598,17 +635,20 @@ def _save_team_constraints(request, team) -> Tuple[str, str]:
         exempt_names = [n for n in exempt_selected if n in valid]
     else:
         exempt_names = []
+    # 专人专项约束
+    person_overrides = _parse_person_overrides(request, team)
 
     team.daily_headcount = daily_headcount
     team.role_reqs = role_reqs
     team.rest_block = {"min": rb_min, "max": rb_max}
     team.min_shift_target = min_shift_target
     team.exempt_names = exempt_names
+    team.person_overrides = person_overrides
     team.save()
     audit_log.info(
-        "保存约束 team=%s daily=%s roles=%s rest=%s target=%s exempt=%s user=%s",
+        "保存约束 team=%s daily=%s roles=%s rest=%s target=%s exempt=%s overrides=%s user=%s",
         team.name, daily_headcount, role_reqs, team.rest_block,
-        min_shift_target, exempt_names, request.user.username,
+        min_shift_target, exempt_names, person_overrides, request.user.username,
     )
     active_count = Person.objects.filter(team=team, is_active=True).count()
     warn = "&warn=daily" if daily_headcount > active_count else ""
@@ -674,7 +714,6 @@ def team_manage(request):
                 error = "只有超级管理员可以新增队组。"
             else:
                 gname = (request.POST.get("group_name") or "").strip()
-                gshort = (request.POST.get("group_short") or "").strip()
                 auser = (request.POST.get("admin_username") or "").strip()
                 apwd = request.POST.get("admin_password") or ""
                 muser = (request.POST.get("member_username") or "").strip()
@@ -689,10 +728,8 @@ def team_manage(request):
                     error = "队组管理员账号与队员账号不能相同。"
                 elif Group.objects.filter(name=gname).exists():
                     error = f"队组名称「{gname}」已存在，请换一个。"
-                elif gshort and Group.objects.filter(short_name=gshort).exists():
-                    error = f"队组缩写「{gshort}」已被占用，请换一个。"
                 else:
-                    g2 = Group.objects.create(name=gname, short_name=gshort)
+                    g2 = Group.objects.create(name=gname)
                     err = _claim_account(g2, "team_admin", auser, apwd)
                     if err:
                         g2.delete()
@@ -717,7 +754,6 @@ def team_manage(request):
                 error = "队组不存在或已被删除。"
             else:
                 gname = (request.POST.get("group_name") or "").strip()
-                gshort = (request.POST.get("group_short") or "").strip()
                 auser = (request.POST.get("admin_username") or "").strip()
                 apwd = request.POST.get("admin_password") or ""
                 muser = (request.POST.get("member_username") or "").strip()
@@ -730,8 +766,6 @@ def team_manage(request):
                     error = "队组管理员账号与队员账号不能相同。"
                 elif Group.objects.filter(name=gname).exclude(id=g2.id).exists():
                     error = f"队组名称「{gname}」已存在，请换一个。"
-                elif gshort and Group.objects.filter(short_name=gshort).exclude(id=g2.id).exists():
-                    error = f"队组缩写「{gshort}」已被占用，请换一个。"
                 else:
                     err = _upsert_group_account(g2, "team_admin", auser, apwd)
                     if err:
@@ -741,7 +775,6 @@ def team_manage(request):
                         error = err2
                 if not error:
                     g2.name = gname
-                    g2.short_name = gshort
                     g2.save()
                     audit_log.info("编辑队组 %s admin=%s member=%s user=%s",
                                    gname, auser, muser, request.user.username)
@@ -987,8 +1020,7 @@ def team_manage(request):
     else:
         team_role_options = ()
 
-    # 连休范围默认显示：生成排班时自动按可解范围「连休 3~5 天、连续上班 4~7 天」
-    # （见 _run_generate 的说明），这里仅用于页面默认值展示。
+    # 连休范围默认显示：取该班组已保存的配置；未保存过时与表单默认值保持一致。
     y0, m0 = current_period()
     _, _, period_days = period_range(y0, m0)
     if default_team and (default_team.min_shift_target or 0) > 0:
@@ -996,7 +1028,22 @@ def team_manage(request):
     else:
         reqs = [p.required_shifts for p in persons_list if p.required_shifts > 0]
         cap_target = (sum(reqs) // len(reqs)) if reqs else 18
-    default_rest_max = 5
+    rb_defaults = (default_team.rest_block if default_team else None) or {}
+    rest_defaults = {
+        "min": max(2, _int_or(rb_defaults.get("min"), 2)),
+        "max": max(2, _int_or(rb_defaults.get("max"), 5)),
+    }
+    default_rest_max = rest_defaults["max"]
+    # 专人专项约束：只展示仍然存在的启用人员（人员被删/禁用后自动不再展示）
+    active_names = {p.name for p in persons_list if p.is_active}
+    override_rows = [
+        {"name": nm,
+         "rest_min": max(2, _int_or(spec.get("rest_min"), 2)),
+         "rest_max": max(2, _int_or(spec.get("rest_max"), 5)),
+         "work_days": max(0, _int_or(spec.get("work_days"), 0))}
+        for nm, spec in ((default_team.person_overrides or {}) if default_team else {}).items()
+        if nm in active_names and isinstance(spec, dict)
+    ]
 
     # 容量预估（提示最多能有多少人排满，需要豁免几人；只统计启用人员）
     capacity = None
@@ -1034,6 +1081,9 @@ def team_manage(request):
         "team_role_options": team_role_options,
         "role_holder_counts": role_holder_counts,
         "default_rest_max": default_rest_max,
+        "rest_defaults": rest_defaults,
+        "override_rows": override_rows,
+        "active_person_names": sorted(active_names),
         "capacity": capacity,
         "period_days": period_days,
         "is_team_user": ug is not None,
@@ -1068,18 +1118,21 @@ def _run_generate(request, team: Team):
     for p in persons:
         default_shift_map[p.name] = p.default_shift
 
+
     # 容量预估的 target：全局「至少应上班数」优先；否则用每人「应上班数」的平均
     if target_global > 0:
         cap_target = target_global
     else:
         reqs = [p.required_shifts for p in persons if p.required_shifts > 0]
         cap_target = (sum(reqs) // len(reqs)) if reqs else 18
-    # 连休范围（用户规则）：最少 2 天；最大值 = (周期天数 − 至少上班天数) // 3（向下取整）。
+    # 连休范围：取班组存储的默认值（在班组管理界面「1.3 连休范围」里配置）；
+    # 未设置时回退到与表单默认一致的 2~5 天。
     # 连续上班：至少 2 天（禁止只上一天班就休息）；
-    # 上限 = (周期天数 // 3) − 最短连续休息天。
+    # 上限 = (周期天数 // 3) − 最短连续休息天数。
     eff_target = cap_target if cap_target > 0 else 18
-    rest_min = 2
-    rest_max = max(2, (days - eff_target) // 3)
+    rb_stored = team.rest_block or {}
+    rest_min = max(2, _int_or(rb_stored.get("min"), 2))
+    rest_max = max(rest_min, _int_or(rb_stored.get("max"), 5))
     work_run_min = 2
     work_run_max = max(2, days // 3 - rest_min)
 
@@ -1090,6 +1143,23 @@ def _run_generate(request, team: Team):
         rest_max, cap_target,
         exempt_count=len(persons) - non_exempt_count,
     )
+
+    # 专人专项约束：把班组存储的 {姓名: {rest_min, rest_max, work_days}}
+    # 转成引擎的 worker_rules（该人的要求完全取代班组默认值）。
+    # 豁免人员不参与休息规则，其专项约束不生效，跳过。
+    person_overrides = {
+        nm: spec for nm, spec in (team.person_overrides or {}).items()
+        if nm not in exempt_set and isinstance(spec, dict)
+    }
+    worker_rules = {}
+    for nm, spec in person_overrides.items():
+        r_min = max(2, _int_or(spec.get("rest_min"), rest_min))
+        r_max = max(r_min, _int_or(spec.get("rest_max"), rest_max))
+        rule = {"rest_block": {"min": r_min, "max": r_max}}
+        work_days = max(0, _int_or(spec.get("work_days"), 0))
+        if work_days > 0:
+            rule["work_days"] = work_days
+        worker_rules[nm] = rule
 
     base_config = {
         "workers": worker_snapshot,
@@ -1102,6 +1172,7 @@ def _run_generate(request, team: Team):
         "exempt_workers": team.exempt_names or [],
         "rest_block": {"min": rest_min, "max": rest_max},
         "work_block": {"min": work_run_min, "max": work_run_max},
+        "worker_rules": worker_rules,
     }
 
     def _build_req():
@@ -1115,15 +1186,22 @@ def _run_generate(request, team: Team):
                 tgt = p.required_shifts - p.worked_so_far
             else:
                 tgt = 0
-            if tgt <= 0 or p.name in exempt_set:
+            # 专人专项的「至少上班天数」取该人自己的要求（覆盖班组目标）
+            ov_days = int((worker_rules.get(p.name) or {}).get("work_days") or 0)
+            if p.name in exempt_set:
                 continue
-            if has_exempt:
-                # 有豁免人员：非豁免恰好上满 tgt，剩余班次交给豁免人员平分
-                req[p.name] = {"target": tgt, "min": tgt, "max": tgt}
-            else:
-                # 无豁免人员：非豁免最低 tgt（硬下限、不设上限），
-                # 多出来的班次由求解器均衡分配给这些人
-                req[p.name] = {"target": tgt, "min": tgt}
+            if ov_days > 0:
+                # 该人有专项要求：以它为目标与硬性下限；不能再套用「豁免模式」的
+                # min == max == 默认目标，否则会把专项要求夹死（无解）。
+                req[p.name] = {"target": ov_days, "min": ov_days}
+            elif tgt > 0:
+                if has_exempt:
+                    # 有豁免人员：非豁免恰好上满 tgt，剩余班次交给豁免人员平分
+                    req[p.name] = {"target": tgt, "min": tgt, "max": tgt}
+                else:
+                    # 无豁免人员：非豁免最低 tgt（硬下限、不设上限），
+                    # 多出来的班次由求解器均衡分配给这些人
+                    req[p.name] = {"target": tgt, "min": tgt}
         return req
 
     config = dict(base_config)
@@ -1137,13 +1215,19 @@ def _run_generate(request, team: Team):
     )
 
     if not result.feasible:
-        # 整体无解：创建记录保存诊断信息（无排班明细）
+        # 整体无解：创建记录保存诊断信息（无排班明细）。
+        # 失败记录只保留「最新一条」用于看诊断——旧的失败记录必然没有明细，
+        # 留着只会堆积成垃圾，这里一并清掉；成功的记录不受影响。
+        Schedule.objects.filter(
+            team=team, year=y, month=m
+        ).exclude(status__in=_EFFECTIVE_STATUSES).delete()
         record = Schedule.objects.create(
             team=team, year=y, month=m, start_date=start, days=days,
-            shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
+            shifts=FIXED_SHIFTS, daily_total=team.daily_headcount,
             role_reqs=team.role_reqs or {}, min_shift_target=team.min_shift_target,
             exempt_names=team.exempt_names or [],
-            rest_block={"min": 2, "max": rest_max},
+            rest_block={"min": rest_min, "max": rest_max},
+            person_overrides=person_overrides,
             worker_snapshot=worker_snapshot,
             status=result.status, message=result.message, diagnostics=result.diagnostics,
         )
@@ -1151,11 +1235,12 @@ def _run_generate(request, team: Team):
 
     record = Schedule.objects.create(
         team=team, year=y, month=m, start_date=start, days=days,
-        shifts=FIXED_SHIFTS, shift_demand={}, daily_total=team.daily_headcount,
+        shifts=FIXED_SHIFTS, daily_total=team.daily_headcount,
         role_reqs=team.role_reqs or {},
         min_shift_target=team.min_shift_target,
         exempt_names=team.exempt_names or [],
-        rest_block={"min": 2, "max": rest_max},
+        rest_block={"min": rest_min, "max": rest_max},
+        person_overrides=person_overrides,
         worker_snapshot=worker_snapshot,
         status=result.status,
         message=result.message,
@@ -1253,8 +1338,28 @@ def person_edit(request, person_id):
 # ---------------------------------------------------------------------------
 # 个人详情：日历 + 下井标签 + 改班（可按月份查看，默认 25 号起算的下一月）
 # ---------------------------------------------------------------------------
+# 「生成失败」的记录也会落库（为了在结果页展示诊断信息），但它没有任何明细。
+# 因此凡是「取该班组该月生效排班」的地方，都必须优先取有明细的那一份；
+# 否则一次失败的重新生成会把原本有效的排班从个人日历/班次展示上「藏掉」。
+_EFFECTIVE_STATUSES = ("OPTIMAL", "FEASIBLE")
+
+
+def _effective_schedule_qs(qs):
+    """按「先成功的、再最新的」排序：成功记录优先于失败记录，同类按创建时间倒序。"""
+    from django.db.models import Case, When, IntegerField
+    return qs.annotate(
+        _ok=Case(When(status__in=_EFFECTIVE_STATUSES, then=0),
+                 default=1, output_field=IntegerField())
+    ).order_by("_ok", "-created_at")
+
+
 def _schedule_for(person: Person, year: int, month: int):
-    return Schedule.objects.filter(team=person.team, year=year, month=month).order_by("-created_at").first()
+    """该人所属班组在指定年月的**生效**排班（优先有明细的成功记录）。"""
+    if person.team_id is None:
+        return None
+    return _effective_schedule_qs(
+        Schedule.objects.filter(team=person.team, year=year, month=month)
+    ).first()
 
 
 @login_required
@@ -1347,10 +1452,9 @@ def _latest_schedules_for_month(year: int, month: int, group: Group = None):
     qs = Schedule.objects.filter(year=year, month=month)
     if group:
         qs = qs.filter(team__group=group)
-    qs = qs.select_related("team").order_by("team_id", "-created_at")
     latest = {}
-    for sch in qs:
-        if sch.team_id not in latest:
+    for sch in _effective_schedule_qs(qs.select_related("team")):
+        if sch.team_id is not None and sch.team_id not in latest:
             latest[sch.team_id] = sch
     return list(latest.values())
 
