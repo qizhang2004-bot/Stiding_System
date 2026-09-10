@@ -32,8 +32,8 @@ class TeamInline(GlassInlineMixin, admin.TabularInline):
 
 @admin.register(Group)
 class GroupAdmin(GlassAdminMixin, admin.ModelAdmin):
-    list_display = ("name", "short_name", "team_count", "person_count")
-    search_fields = ("name", "short_name")
+    list_display = ("name", "team_count", "person_count", "admin_username", "member_username")
+    search_fields = ("name",)
     inlines = [TeamInline]
 
     @admin.display(description="班组数")
@@ -43,6 +43,14 @@ class GroupAdmin(GlassAdminMixin, admin.ModelAdmin):
     @admin.display(description="人员数")
     def person_count(self, obj):
         return obj.person_count
+
+    @admin.display(description="队组管理员账号")
+    def admin_username(self, obj):
+        return obj.admin_username or "—"
+
+    @admin.display(description="队员查看账号")
+    def member_username(self, obj):
+        return obj.member_username or "—"
 
 
 class PersonInline(GlassInlineMixin, admin.TabularInline):
