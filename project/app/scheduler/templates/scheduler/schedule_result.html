@@ -153,9 +153,10 @@
 </div>
 
 <div class="text-muted-light small mt-2">
-    配置快照：班组 {{ record.team.name|default:"—" }}；每天下井 {{ record.daily_total|default:record.shift_demand }} 人；
+    配置快照：班组 {{ record.team.name|default:"—" }}；每天下井 {{ record.daily_total|default:"—" }} 人；
     岗位条件 {{ record.role_reqs }}；全局最少班数 {{ record.min_shift_target }}；
-    豁免 {{ record.exempt_names|default:"无" }}；连休 {{ record.rest_block }}。
+    豁免 {{ record.exempt_names|default:"无" }}；连休 {{ record.rest_block }}；
+    专人专项 {{ record.person_overrides|default:"无" }}。
     生成时间：{{ record.created_at|date:"Y-m-d H:i:s" }}
 </div>
 {% endif %}

@@ -48,10 +48,6 @@
                         <label class="form-label fw-semibold">队组名称</label>
                         <input type="text" name="group_name" class="form-control" placeholder="如：综掘三队" required>
                     </div>
-                    <div class="mb-2">
-                        <label class="form-label fw-semibold">队组缩写（可选，队员登录名建议用）</label>
-                        <input type="text" name="group_short" class="form-control" placeholder="如：zj三队">
-                    </div>
                     <hr>
                     <div class="row g-2">
                         <div class="col-6">
@@ -71,7 +67,7 @@
                             <input type="text" name="member_password" class="form-control" placeholder="登录密码" required>
                         </div>
                     </div>
-                    <div class="text-muted-light small mt-2">队员账号为只读（只能查看排班）；密码不做强度校验。</div>
+                    <div class="text-muted-light small mt-2">上面填写的两个账号就是该队组的登录账号（队员账号只读，只能查看排班）；密码不做强度校验。</div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -96,15 +92,9 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="row g-2">
-                        <div class="col-6">
-                            <label class="form-label fw-semibold">队组名称</label>
-                            <input type="text" name="group_name" class="form-control" value="{{ selected_group.name }}" required>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label fw-semibold">队组缩写</label>
-                            <input type="text" name="group_short" class="form-control" value="{{ selected_group.short_name }}">
-                        </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">队组名称</label>
+                        <input type="text" name="group_name" class="form-control" value="{{ selected_group.name }}" required>
                     </div>
                     <hr>
                     <div class="row g-2">
@@ -287,17 +277,17 @@
                 <input type="number" name="daily_headcount" class="form-control" min="0" value="{{ team.daily_headcount }}">
             </div>
             <div class="col-md-4">
-                <label class="form-label fw-semibold">1.3 连休范围（天）</label>
+                <label class="form-label fw-semibold">1.3 休息日要求（连休天数）</label>
                 <div class="input-group">
                     <span class="input-group-text">≥</span>
-                    <input type="number" name="rest_min" class="form-control" min="1" value="{{ team.rest_block.min|default:2 }}">
+                    <input type="number" name="rest_min" class="form-control" min="2" value="{{ rest_defaults.min }}">
                     <span class="input-group-text">≤</span>
-                    <input type="number" name="rest_max" class="form-control" min="1" value="{{ team.rest_block.max|default:default_rest_max }}">
+                    <input type="number" name="rest_max" class="form-control" min="2" value="{{ rest_defaults.max }}">
                 </div>
-                <div class="form-text">生成排班时自动按规则：<b>连休 2 天 ~ (周期天数−最少上班天数)÷3 天</b>；<b>连续上班至少 2 天、最多 (周期天数÷3)−最短休息天数 天</b></div>
+                <div class="form-text">休息必须连续 <b>{{ rest_defaults.min }}</b> 天以上、不超过 <b>{{ rest_defaults.max }}</b> 天（不允许单休，含月初/月末）。连续上班至少 2 天，最多 <b id="workRunMaxHint">—</b> 天（上限 = 周期天数÷3 − 最短休息天数，随上面的「≥」自动变化）。</div>
             </div>
             <div class="col-md-4">
-                <label class="form-label fw-semibold">1.4 每人应上最少班数</label>
+                <label class="form-label fw-semibold">1.4 每人应上最少班数（默认）</label>
                 <div class="input-group">
                     <input type="number" name="min_shift_target" class="form-control" min="0" value="{{ team.min_shift_target }}">
                     <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#exemptModal">豁免人员</button>
@@ -349,6 +339,56 @@
             <button type="button" class="btn btn-sm btn-outline-primary" id="addRole">+ 添加岗位条件</button>
         </div>
 
+        <!-- 1.5 专人专项约束：逐人覆盖上面的休息日要求与最少上班天数 -->
+        <div class="mb-3">
+            <label class="form-label fw-semibold">
+                1.5 专人专项约束
+                <span class="text-muted-light small">（为某个人单独指定休息日与最少上班天数，<b>优先于上面的默认值</b>；不添加则该人按默认值排班）</span>
+            </label>
+            <div id="overrideRows">
+                {% for ov in override_rows %}
+                <div class="input-group mb-2">
+                    <select name="ov_person" class="form-select" style="min-width:120px; max-width:190px;">
+                        <option value="{{ ov.name }}" selected>{{ ov.name }}</option>
+                        {% for p in team_persons %}{% if p.is_active and p.name != ov.name %}
+                        <option value="{{ p.name }}">{{ p.name }}</option>
+                        {% endif %}{% endfor %}
+                    </select>
+                    <span class="input-group-text">连休 ≥</span>
+                    <input type="number" name="ov_rest_min" class="form-control" min="2" style="max-width:80px;" value="{{ ov.rest_min }}">
+                    <span class="input-group-text">≤</span>
+                    <input type="number" name="ov_rest_max" class="form-control" min="2" style="max-width:80px;" value="{{ ov.rest_max }}">
+                    <span class="input-group-text">至少上班</span>
+                    <input type="number" name="ov_work_days" class="form-control" min="0" style="max-width:90px;" value="{{ ov.work_days }}">
+                    <span class="input-group-text">班</span>
+                    <button type="button" class="btn btn-outline-danger remove-row">×</button>
+                </div>
+                {% empty %}
+                <div class="text-muted-light" id="overrideEmpty">还没有专人专项约束，点击下方「+ 添加专人专项约束」为该班某个人单独设定要求。</div>
+                {% endfor %}
+                <!-- 新增行的原型（隐藏）。必须放在 #overrideRows 内部（两种分支都要在容器内）：
+                     JS 用 overrideRows.insertBefore(row, proto) 插到它前面，
+                     若它落在容器外会抛 NotFoundError，导致「添加」按钮点了没反应。
+                     下拉选项由 JS 按 activePersonsData 填充。 -->
+                <div class="input-group mb-2 d-none" id="newOverrideRow">
+                    <select name="ov_person" class="form-select" style="min-width:120px; max-width:190px;"></select>
+                    <span class="input-group-text">连休 ≥</span>
+                    <input type="number" name="ov_rest_min" class="form-control" min="2" style="max-width:80px;" value="{{ rest_defaults.min }}">
+                    <span class="input-group-text">≤</span>
+                    <input type="number" name="ov_rest_max" class="form-control" min="2" style="max-width:80px;" value="{{ rest_defaults.max }}">
+                    <span class="input-group-text">至少上班</span>
+                    <input type="number" name="ov_work_days" class="form-control" min="0" style="max-width:90px;" value="0">
+                    <span class="input-group-text">班</span>
+                    <button type="button" class="btn btn-outline-danger remove-row">×</button>
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="addOverride">+ 添加专人专项约束</button>
+            <div class="form-text mt-1">
+                「至少上班」填 <b>0</b> 表示这一项沿用默认值（只覆盖休息日要求）。
+                被勾选为「豁免人员」的人不参与休息规则与最少班数约束，其专项约束不生效。
+                若某人填的上班天数在其余规则下排不出来，生成时会在结果页给出中文诊断。
+            </div>
+        </div>
         <div class="d-flex gap-2">
             <button class="btn btn-primary px-4" type="submit" name="action" value="save_constraints">💾 保存约束</button>
             <button class="btn btn-success px-4" type="submit" name="action" value="generate">⚙️ 生成「{{ team.name }}」排班</button>
@@ -371,11 +411,11 @@
             <div class="fs-5 fw-bold">{{ team.daily_headcount }} 人</div>
         </div>
         <div class="col-md-4">
-            <div class="text-muted-light small">1.3 连休范围（天）</div>
-            <div class="fs-5 fw-bold">≥ {{ team.rest_block.min|default:2 }} ~ ≤ {{ team.rest_block.max|default:4 }}</div>
+            <div class="text-muted-light small">1.3 休息日要求（连休天数）</div>
+            <div class="fs-5 fw-bold">≥ {{ rest_defaults.min }} ~ ≤ {{ rest_defaults.max }} 天</div>
         </div>
         <div class="col-md-4">
-            <div class="text-muted-light small">1.4 每人应上最少班数</div>
+            <div class="text-muted-light small">1.4 每人应上最少班数（默认）</div>
             <div class="fs-5 fw-bold">{{ team.min_shift_target }} 班</div>
         </div>
         <div class="col-12">
@@ -384,6 +424,20 @@
                 {% if team.role_reqs %}
                     {% for role, spec in team.role_reqs.items %}
                     <span class="badge text-bg-light border me-1" style="border-radius:8px;">{{ role }} {{ spec.op }} {{ spec.count }}</span>
+                    {% endfor %}
+                {% else %}
+                    <span class="text-muted-light">未设置</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="text-muted-light small">1.5 专人专项约束（优先于上面的默认值）</div>
+            <div>
+                {% if override_rows %}
+                    {% for ov in override_rows %}
+                    <span class="badge text-bg-light border me-1 mb-1" style="border-radius:8px;">
+                        {{ ov.name }}：连休 ≥{{ ov.rest_min }} ~ ≤{{ ov.rest_max }} 天{% if ov.work_days %}，至少 {{ ov.work_days }} 班{% endif %}
+                    </span>
                     {% endfor %}
                 {% else %}
                     <span class="text-muted-light">未设置</span>
@@ -537,7 +591,64 @@
 
 {% block scripts %}
 {{ role_holder_counts|json_script:"holdersData" }}
+{{ active_person_names|json_script:"activePersonsData" }}
 <script>
+// ---- 专人专项约束：点击「+ 添加」增加一行，可从下拉里选本班组任意人员 ----
+const ACTIVE_PERSONS = JSON.parse(document.getElementById('activePersonsData')?.textContent || '[]');
+const overrideProto = document.getElementById('newOverrideRow');
+const overrideRows = document.getElementById('overrideRows');
+
+// 当前表单里已存在的专项行（不含隐藏原型）
+function ovRowList() {
+    return [...document.querySelectorAll('#overrideRows .input-group')]
+        .filter(r => r.id !== 'newOverrideRow');
+}
+// 重建某一行的姓名下拉：保留当前选择，并禁用已被其它行占用的姓名
+function fillPersonOptions(row) {
+    const sel = row.querySelector('select[name="ov_person"]');
+    if (!sel) return;
+    const taken = new Set(ovRowList()
+        .filter(r => r !== row)
+        .map(r => r.querySelector('select[name="ov_person"]')?.value)
+        .filter(Boolean));
+    const keep = sel.value;
+    sel.innerHTML = '';
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = '选择人员…';
+    sel.appendChild(blank);
+    ACTIVE_PERSONS.forEach(nm => {
+        const o = document.createElement('option');
+        o.value = nm;
+        o.textContent = nm;
+        if (taken.has(nm)) o.disabled = true;
+        sel.appendChild(o);
+    });
+    if (keep) sel.value = keep;
+}
+function refreshOverrideOptions() { ovRowList().forEach(fillPersonOptions); }
+
+document.getElementById('addOverride')?.addEventListener('click', function () {
+    if (!overrideProto) return;
+    document.getElementById('overrideEmpty')?.remove();
+    const row = overrideProto.cloneNode(true);
+    row.classList.remove('d-none');
+    row.id = '';
+    row.querySelectorAll('input').forEach(inp => { inp.value = inp.defaultValue; });
+    overrideRows.insertBefore(row, overrideProto);
+    fillPersonOptions(row);
+    row.querySelector('.remove-row')?.addEventListener('click', function () { row.remove(); });
+    row.querySelector('select[name="ov_person"]')?.focus();
+});
+
+// 已保存的专项行：补全下拉并绑定删除
+ovRowList().forEach(row => {
+    fillPersonOptions(row);
+    row.querySelector('.remove-row')?.addEventListener('click', function () { row.remove(); });
+});
+overrideRows?.addEventListener('change', function (e) {
+    if (e.target.matches('select[name="ov_person"]')) refreshOverrideOptions();
+});
 // ---- 按岗位筛选（可多选） ----
 const filterAll = document.getElementById('filterAll');
 const roleFilters = [...document.querySelectorAll('.role-filter[data-role]')];
@@ -564,33 +675,35 @@ roleFilters.forEach(c => c.addEventListener('change', function () {
 }));
 
 // 删除班组确认：必须输入「删除」两个字才能点确认
+// （注意：下面这些元素在部分角色/页面上不存在，必须逐个判空，
+//   否则这里抛异常会中断整个脚本，导致后面的实时自检等全都不生效）
 const delInput = document.getElementById('delConfirmInput');
 const delBtn = document.getElementById('delTeamBtn');
 const delText = document.getElementById('delConfirmText');
-if (delInput) {
+if (delInput && delBtn && delText) {
     delInput.addEventListener('input', function () {
         const ok = this.value.trim() === '删除';
         delBtn.disabled = !ok;
         delText.value = this.value.trim();
     });
-    document.getElementById('delTeamModal').addEventListener('show.bs.modal', function () {
+    document.getElementById('delTeamModal')?.addEventListener('show.bs.modal', function () {
         delInput.value = '';
         delText.value = '';
         delBtn.disabled = true;
     });
 }
 
-// 删除队组确认：同样必须输入「删除」两个字
+// 删除队组确认：同样必须输入「删除」两个字（仅超级管理员能看到该弹窗）
 const delGInput = document.getElementById('delGroupInput');
 const delGBtn = document.getElementById('delGroupBtn');
 const delGText = document.getElementById('delGroupText');
-if (delGInput) {
+if (delGInput && delGBtn && delGText) {
     delGInput.addEventListener('input', function () {
         const ok = this.value.trim() === '删除';
         delGBtn.disabled = !ok;
         delGText.value = this.value.trim();
     });
-    document.getElementById('delGroupModal').addEventListener('show.bs.modal', function () {
+    document.getElementById('delGroupModal')?.addEventListener('show.bs.modal', function () {
         delGInput.value = '';
         delGText.value = '';
         delGBtn.disabled = true;
@@ -615,11 +728,13 @@ const DAYS = {{ period_days }};
 const HOLDERS = JSON.parse(document.getElementById('holdersData').textContent);
 const TOTAL_PEOPLE = {{ active_person_count }};
 function liveCheck() {
-    const daily = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
+    const headcount = parseInt(document.querySelector('input[name="daily_headcount"]')?.value) || 0;
     const target = parseInt(document.querySelector('input[name="min_shift_target"]')?.value) || 0;
     const elCap = document.getElementById('liveCapacity');
     const elRoles = document.getElementById('liveRoles');
     if (!elCap || !elRoles) return;
+
+    const daily = headcount;
 
     // 总容量：本周期一共多少个班次，最多能有多少人上满“最少班数”，差几个就需豁免几个
     if (daily > TOTAL_PEOPLE) {
@@ -670,6 +785,15 @@ function liveCheck() {
 });
 document.getElementById('roleRows')?.addEventListener('change', liveCheck);
 document.getElementById('roleRows')?.addEventListener('input', liveCheck);
+// 「连续上班上限」提示：max = 周期天数÷3 − 最短休息天数
+function updateWorkRunHint() {
+    const el = document.getElementById('workRunMaxHint');
+    if (!el) return;
+    const rmin = parseInt(document.querySelector('input[name="rest_min"]')?.value) || 2;
+    el.textContent = Math.max(2, Math.floor(DAYS / 3) - Math.max(2, rmin));
+}
+document.querySelector('input[name="rest_min"]')?.addEventListener('input', updateWorkRunHint);
+updateWorkRunHint();
 liveCheck();
 </script>
 {% endblock %}
