@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}{{ work_date|date:"Y-m-d" }} {{ shift_label }} 添加人员 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'accounts:home' %}">首页</a> / <a href="{% url 'scheduler:shift_board' %}">排班日历</a> / <a href="{% url 'scheduler:shift_board_detail' work_date|date:'Y-m-d' shift_name %}{% if focus_team %}?team={{ focus_team.pk }}{% endif %}">{{ work_date|date:"Y-m-d" }} {{ shift_label }}</a> / 添加人员</div>{% endblock %}
+{% block page_title %}添加人员 · {{ work_date|date:"Y-m-d" }} {{ shift_label }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2><span class="shift-tag shift-{{ shift_name }}">{{ shift_label }}</span> {{ work_date|date:"Y年n月j日" }} 添加人员</h2>
+    <p class="page-desc">
+      当前选择：<strong>{{ org.name }}</strong> · <strong>{{ work_date|date:"Y-m-d" }}</strong> ·
+      <strong>{{ shift_label }}</strong>{% if focus_team %} · 重点班组 <strong>{{ focus_team.name }}</strong>{% endif %}。
+      下方为该队组当天尚未排班的人员，按所属班组分组；点击姓名即加入该日期、该班次。
+    </p>
+  </div>
+  <div>
+    <a class="btn btn-sm" href="{% url 'scheduler:shift_board_detail' work_date|date:'Y-m-d' shift_name %}{% if focus_team %}?team={{ focus_team.pk }}{% endif %}">返回班次名单</a>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">姓名 / 职工编号 / 岗位</label>
+      <input class="input" type="search" name="q" id="q" value="{{ keyword }}" placeholder="输入关键字筛选候选人">
+    </div>
+    {% if focus_team %}<input type="hidden" name="focus" value="{{ focus_team.pk }}">{% endif %}
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{{ request.path }}{% if focus_team %}?focus={{ focus_team.pk }}{% endif %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">可添加人员<span class="card-title-note">共 {{ candidate_count }} 人 · 按班组分组</span></div>
+  {% if candidates %}
+    {% for group in candidates %}
+    <div class="candidate-group{% if focus_team and group.id == focus_team.pk %} candidate-group-focus{% endif %}">
+      <div class="candidate-group-title">
+        {{ group.name }}
+        <span class="cell-muted">（{{ group.people|length }} 人）</span>
+        {% if focus_team and group.id == focus_team.pk %}<span class="badge badge-info">当前班组</span>{% endif %}
+      </div>
+      <div class="candidate-people">
+        {% for person in group.people %}
+        <form method="post" class="inline-form">
+          {% csrf_token %}
+          <input type="hidden" name="employee_id" value="{{ person.employee_id }}">
+          <button type="submit" class="btn btn-sm candidate-btn" title="将 {{ person.name }} 加入 {{ work_date|date:'Y-m-d' }} {{ shift_label }}">
+            {{ person.name }}<span class="cell-muted">{{ person.employee_no }}{% if person.position %} · {{ person.position }}{% endif %}</span>
+          </button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    {% if keyword %}
+      {% include "includes/_empty.html" with title="没有匹配的人员" description="尝试更换姓名、职工编号或岗位关键字。" %}
+    {% else %}
+      {% include "includes/_empty.html" with title="没有可添加的人员" description="当前队组内所有归属该班次的在册职工当天均已有排班记录。" %}
+    {% endif %}
+  {% endif %}
+  <p class="field-help">添加会直接写入当前有效的每日排班记录并记录审计；同一职工同一天只允许一条有效排班（休息也算已安排），如需把休息改为上班请使用「改班」。</p>
+</div>
+{% endblock %}

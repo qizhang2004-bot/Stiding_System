@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% load extras %}
+
+{% block title %}班次配置 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 排班管理 / 班次配置</div>{% endblock %}
+{% block page_title %}班次配置{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>班次配置</h2>
+    <p class="page-desc">每个班组有早班、中班、晚班三条独立配置。新建班组时生成的占位配置为「待配置」状态，完成参数设置并启用前不会被正式排班使用。</p>
+  </div>
+</div>
+
+<div class="alert alert-info">
+  <strong>参数说明：</strong>「排班目标班数（required_shifts）」是排班算法使用的目标值；
+  职工表中的「矿上最低班数」仅用于出勤达标统计与预警，二者互不影响。
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item">
+      <label for="filter-organization">所属队组</label>
+      <select class="input" name="organization" id="filter-organization">
+        <option value="">请选择队组</option>
+        {% for o in orgs %}
+        <option value="{{ o.pk }}" {% if org and org.pk == o.pk %}selected{% endif %}>{{ o.name }}（{{ o.code }}）{% if not o.is_active %} · 已停用{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="filter-team">所属班组</label>
+      <select class="input" name="team" id="filter-team">
+        <option value="">请选择班组</option>
+        {% for t in teams %}
+        <option value="{{ t.pk }}" {% if team and team.pk == t.pk %}selected{% endif %}>{{ t.name }}（{{ t.code }}）{% if not t.is_active %} · 已停用{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查看配置</button>
+    </div>
+  </form>
+</div>
+
+{% if team %}
+<div class="page-head" style="margin-top: 4px;">
+  <div>
+    <h2>{{ org.name }} / {{ team.name }} 的班次配置</h2>
+    <p class="page-desc">已启用 {{ active_count }} / {{ configs|length }} 条配置。</p>
+  </div>
+</div>
+
+{% for cfg in configs %}
+<div class="card">
+  <div class="card-title">
+    <span>
+      <span class="shift-tag {% if cfg.shift_name == 'early' %}shift-early{% elif cfg.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ cfg.get_shift_name_display }}</span>
+      {% if cfg.is_active %}
+        <span class="badge badge-success">已启用</span>
+      {% else %}
+        <span class="badge badge-warning">待配置</span>
+      {% endif %}
+      {% if config_issues|get_item:cfg.pk %}<span class="badge badge-danger">参数异常</span>{% endif %}
+    </span>
+    <span>
+      <a class="btn btn-sm" href="{% url 'organization:shift_config_edit' cfg.pk %}">编辑参数</a>
+      <form class="inline-form" method="post" action="{% url 'organization:shift_config_toggle' cfg.pk %}"
+            data-confirm="{% if cfg.is_active %}确认停用{{ cfg.get_shift_name_display }}配置？停用后该班次将不参与排班。{% else %}确认启用{{ cfg.get_shift_name_display }}配置？启用前系统会校验参数合法性。{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="btn btn-sm {% if cfg.is_active %}btn-danger{% else %}btn-success{% endif %}">
+          {% if cfg.is_active %}停用{% else %}启用{% endif %}
+        </button>
+      </form>
+    </span>
+  </div>
+
+  <div class="detail-grid" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
+    <div class="detail-item"><div class="detail-label">每日用工人数（该班次每天上班人数）</div><div class="detail-value">{{ cfg.daily_worker_count }}</div></div>
+    <div class="detail-item"><div class="detail-label">连续休息最少天数</div><div class="detail-value">{{ cfg.min_consecutive_rest_days }}</div></div>
+    <div class="detail-item"><div class="detail-label">连续休息最多天数</div><div class="detail-value">{{ cfg.max_consecutive_rest_days }}</div></div>
+    <div class="detail-item"><div class="detail-label">排班目标班数（算法使用）</div><div class="detail-value">{{ cfg.required_shifts }}</div></div>
+    <div class="detail-item">
+      <div class="detail-label">岗位要求人数（项/人）</div>
+      <div class="detail-value">
+        {% with ps=pos_summaries|get_item:cfg.pk %}{{ ps.count }} 项 / {{ ps.total }} 人{% endwith %}
+      </div>
+    </div>
+    <div class="detail-item">
+      <div class="detail-label">豁免职工</div>
+      <div class="detail-value">
+        {% for name in exempt_names|get_item:cfg.pk %}<span class="badge badge-info">{{ name }}</span> {% empty %}<span class="cell-muted">无</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% if config_issues|get_item:cfg.pk %}
+  <div class="alert alert-danger" style="margin: 12px 0 0;">
+    <strong>参数校验未通过：</strong>
+    {% for issue in config_issues|get_item:cfg.pk %}<div>{{ issue }}</div>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+  {% include "includes/_empty.html" with title="请先选择队组和班组" description="选择队组与班组后，可查看其早/中/晚三条班次配置。" %}
+</div>
+{% endif %}
+{% endblock %}

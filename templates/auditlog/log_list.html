@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}操作日志 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 系统管理 / 操作日志</div>{% endblock %}
+{% block page_title %}操作日志{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>操作日志</h2>
+    <p class="page-desc">记录系统关键操作，只读展示，不支持修改或删除。当前日志主要来自系统写操作的自动记录（HTTP 中间件），业务级审计能力后续完善。</p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">操作用户 / 描述</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入用户名或描述关键字">
+    </div>
+    <div class="filter-item">
+      <label for="module">模块</label>
+      <select class="input" name="module" id="module">
+        <option value="">全部模块</option>
+        {% for m in modules %}<option value="{{ m }}" {% if module == m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="action">操作类型</label>
+      <select class="input" name="action" id="action">
+        <option value="">全部类型</option>
+        {% for a in actions %}<option value="{{ a }}" {% if action == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="start_date">开始日期</label>
+      <input class="input" type="date" name="start_date" id="start_date" value="{{ start_date }}">
+    </div>
+    <div class="filter-item">
+      <label for="end_date">结束日期</label>
+      <input class="input" type="date" name="end_date" id="end_date" value="{{ end_date }}">
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'auditlog:log_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>操作时间</th>
+          <th>操作用户</th>
+          <th>模块</th>
+          <th>操作类型</th>
+          <th>操作对象</th>
+          <th>操作描述</th>
+          <th>IP 地址</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in page_obj %}
+        <tr>
+          <td class="cell-muted">{{ log.created_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{{ log.username|default:"-" }}</td>
+          <td><span class="badge badge-info">{{ log.module }}</span></td>
+          <td>{{ log.action }}</td>
+          <td>{{ log.target_type|default:"-" }}{% if log.target_id %} #{{ log.target_id }}{% endif %}</td>
+          <td class="cell-truncate" title="{{ log.description }}">{{ log.description }}</td>
+          <td class="cell-muted">{{ log.ip_address|default:"-" }}</td>
+          <td class="actions"><a class="btn btn-sm" href="{% url 'auditlog:log_detail' log.pk %}">详情</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8">
+          {% include "includes/_empty.html" with title="暂无操作日志" description="系统执行写操作后会在此记录。请调整筛选条件重试。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

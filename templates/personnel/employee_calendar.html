@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load extras %}
+
+{% block title %}{{ employee.name }} 排班日历 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / <a href="{% url 'personnel:person_board' %}">个人信息看板</a> / {{ employee.name }} 排班日历</div>{% endblock %}
+{% block page_title %}{{ employee.name }} · 排班日历{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>{{ employee.name }} <span class="badge badge-info">{{ employee.employee_no }}</span>
+      {% if is_current_period %}<span class="badge badge-success">当前周期</span>{% endif %}
+    </h2>
+    <p class="page-desc">
+      排班周期（每月 25 日至次月 24 日）：<strong>{{ period_start|date:"Y-m-d" }}</strong> ~
+      <strong>{{ period_end|date:"Y-m-d" }}</strong>，共 {{ days|length }} 天；本周期排班 <strong>{{ scheduled }}</strong> 班。
+      {% if is_archive_view %}<span class="badge badge-warning">历史归档（只读）</span>该周期已归档，展示归档时的最终排班。{% else %}数据来自数据库中的当前有效排班记录。{% endif %}
+    </p>
+  </div>
+  <div>
+    <a class="btn btn-sm" href="?period={{ prev_period }}">‹ 上一周期</a>
+    <a class="btn btn-sm" href="{% url 'personnel:employee_calendar' employee.pk %}">当前周期</a>
+    <a class="btn btn-sm" href="?period={{ next_period }}">下一周期 ›</a>
+    <a class="btn btn-sm" href="{% url 'personnel:employee_detail' employee.pk %}">返回职工详情</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="cal-weekdays">
+    <span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span>
+  </div>
+  <div class="cal-grid">
+    {% for blank in leading_blanks %}<div class="cal-cell cal-out"></div>{% endfor %}
+    {% for day in days %}
+    <div class="cal-cell{% if day.date == today %} cal-today{% endif %}{% if focus_date and day.date == focus_date %} cal-focus{% endif %}"
+         {% if focus_date and day.date == focus_date %}id="cal-focus"{% endif %}>
+      <div class="cal-day">
+        {{ day.date|date:"n月j日" }}
+        <span class="cell-muted">{{ day.weekday }}</span>
+      </div>
+      {% if day.record %}
+        <div class="cal-plan">班次：<span class="cal-badge cal-{{ day.shift_type }}">{{ day.shift_label }}</span></div>
+        <div class="cal-position">岗位：{{ day.position|default:"普工" }}</div>
+        {% if can_edit %}
+        <form method="post" action="{% url 'scheduler:shift_board_change' day.record.pk %}" class="inline-form cal-change">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.get_full_path }}">
+          <label class="sr-only" for="cal-shift-{{ day.record.pk }}">{{ day.date }} 班次</label>
+          <select class="input input-sm" name="target_shift" id="cal-shift-{{ day.record.pk }}">
+            {% for value, label in shift_choices %}
+            <option value="{{ value }}" {% if value == day.shift_type %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="btn btn-sm">改班</button>
+        </form>
+        {% endif %}
+      {% else %}
+        <div class="cal-badge cal-none">未排班</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <p class="field-help">
+    {% if can_edit %}如需休息或调整当天安排，请使用上方「改班」把状态改为休息/其他班次；不再提供删除按钮，避免误删整天的排班记录。{% else %}当前账号为只读。{% endif %}
+    排班生成与维护请前往 <a href="{% url 'scheduler:shift_board' %}">排班日历</a>。
+  </p>
+</div>
+
+{% if focus_date %}<script>var el = document.getElementById("cal-focus"); if (el) el.scrollIntoView({ block: "center" });</script>{% endif %}
+{% endblock %}

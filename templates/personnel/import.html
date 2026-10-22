@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}职工导入 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 人员管理 / 职工导入</div>{% endblock %}
+{% block page_title %}职工导入{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>职工导入</h2>
+    <p class="page-desc">按固定 8 列格式准备职工数据文件。当前版本支持「校验预览」：上传后系统逐行校验并展示结果，<strong>不会写入数据库</strong>。</p>
+  </div>
+</div>
+
+<div class="alert alert-warning">
+  <strong>功能说明：</strong>上传后先进行整批校验与预览；<strong>只要存在错误，就不会写入任何职工数据</strong>。
+  全部校验通过后，点击「确认导入」才会在事务中整批写入（写入前会再次校验）。
+</div>
+
+<div class="card">
+  <div class="card-title">导入格式说明（固定 8 列，按列顺序解析）
+    <a class="btn btn-sm" href="{% url 'personnel:import_template' %}">下载 CSV 模板</a>
+  </div>
+  <div class="table-scroll">
+    <table class="import-format-table">
+      <thead>
+        <tr><th class="num">列</th><th>列名</th><th>必填</th><th>说明</th><th>示例</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="num">1</td><td>队组编号</td><td>是</td><td>已存在的队组编号（organization_unit.code），用于确定职工所属队组</td><td>ORG-01</td></tr>
+        <tr><td class="num">2</td><td>班组编号</td><td>是</td><td>属于第一列队组的班组编号（team.code）</td><td>T01-01</td></tr>
+        <tr><td class="num">3</td><td>职工编号</td><td>是</td><td>全局唯一，长度 ≤ 50</td><td>E001</td></tr>
+        <tr><td class="num">4</td><td>姓名</td><td>是</td><td>长度 ≤ 50</td><td>张三</td></tr>
+        <tr><td class="num">5</td><td>岗位</td><td>否</td><td>长度 ≤ 100</td><td>值班员</td></tr>
+        <tr><td class="num">6</td><td>班次</td><td>是</td><td>early（早班）/ middle（中班）/ night（夜班），班组须有该班次配置</td><td>early</td></tr>
+        <tr><td class="num">7</td><td>已上班数</td><td>是</td><td>当前排班周期（每月25日至次月24日）已完成的出勤班数，0~32767 整数</td><td>15</td></tr>
+        <tr><td class="num">8</td><td>矿上应上最少班数</td><td>是</td><td>仅用于出勤达标统计，不参与排班算法，0~32767 整数</td><td>18</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="field-help" style="margin-top: 10px;">
+    校验顺序：先按第 1 列查队组，再按第 2 列查班组并校验班组确属该队组，随后依次校验职工编号、姓名、岗位、班次与班数。
+    提示信息会区分「队组编号不存在」「班组编号不存在」「队组与班组不匹配」，不会笼统提示“班组不存在”。
+  </p>
+</div>
+
+<div class="card">
+  <div class="card-title">上传文件校验</div>
+  <form method="post" enctype="multipart/form-data" class="form" data-guard-submit>
+    {% csrf_token %}
+    <div class="upload-zone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+      <p>选择 .csv（UTF-8）或 .xlsx 文件，单次最多校验前 200 行</p>
+      {% for error in form.file.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      <div style="margin-top: 10px;">
+        <label class="btn btn-primary" for="id_file">选择文件</label>
+        {{ form.file }}
+      </div>
+      <p class="field-help" id="import-file-info">未选择文件</p>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">上传并校验预览</button>
+    </div>
+  </form>
+</div>
+
+{% if file_info %}
+<div class="card">
+  <div class="card-title">校验预览 <span class="card-title-note">文件：{{ file_info.name }}（{{ file_info.size }} 字节）· 仅校验，未写入数据库</span></div>
+  {% if results %}
+  <div class="import-summary">
+    <div class="summary-item ok"><span class="summary-count">{{ results.ok|length }}</span> 行校验通过（预览，尚未入库）</div>
+    <div class="summary-item bad"><span class="summary-count">{{ results.failed|length }}</span> 行校验失败</div>
+    {% if truncated %}<div class="summary-item"><span class="summary-count text-muted">200+</span> 行已截断，仅展示前 200 行</div>{% endif %}
+  </div>
+  <p class="field-help" style="margin-bottom: 10px;">「文件行号」是数据在文件中的位置（第 1 行为表头），仅用于定位问题，<strong>不是职工工号</strong>。</p>
+
+  {% if results.failed %}
+  <div class="card-title">失败明细（含行号、字段与原因）</div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="num">文件行号</th>
+          <th>队组编号</th><th>班组编号</th><th>职工编号</th><th>姓名</th>
+          <th>岗位</th><th>班次</th><th class="num">已上班数</th><th class="num">矿上应上最少班数</th>
+          <th>校验结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in results.failed %}
+        <tr>
+          <td class="num">{{ item.line }}</td>
+          <td>{{ item.data.队组编号|default:"-" }}</td>
+          <td>{{ item.data.班组编号|default:"-" }}</td>
+          <td>{{ item.data.职工编号|default:"-" }}</td>
+          <td>{{ item.data.姓名|default:"-" }}</td>
+          <td>{{ item.data.岗位|default:"-" }}</td>
+          <td>{{ item.data.班次|default:"-" }}</td>
+          <td class="num">{{ item.data.已上班数|default:"-" }}</td>
+          <td class="num">{{ item.data.矿上应上最少班数|default:"-" }}</td>
+          <td>{% for err in item.errors %}<div class="field-error" style="margin: 0;">{{ err }}</div>{% endfor %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if results.ok %}
+  <div class="card-title">通过校验的行（预览，尚未入库）</div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="num">文件行号</th>
+          <th>队组编号</th><th>班组编号</th><th>职工编号</th><th>姓名</th>
+          <th>岗位</th><th>班次</th><th class="num">已上班数</th><th class="num">矿上应上最少班数</th>
+          <th>校验结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in results.ok %}
+        <tr>
+          <td class="num">{{ item.line }}</td>
+          <td>{{ item.data.队组编号 }}</td>
+          <td>{{ item.data.班组编号 }}</td>
+          <td>{{ item.data.职工编号 }}</td>
+          <td>{{ item.data.姓名 }}</td>
+          <td>{{ item.data.岗位|default:"-" }}</td>
+          <td>{{ item.data.班次 }}</td>
+          <td class="num">{{ item.data.已上班数 }}</td>
+          <td class="num">{{ item.data.矿上应上最少班数 }}</td>
+          <td><span class="badge badge-success">通过</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% if results.ok and not results.failed %}
+  <div class="card" style="margin-top: 14px;">
+    <div class="card-title">确认导入 <span class="card-title-note">全部 {{ results.ok|length }} 行校验通过</span></div>
+    <p class="field-help">点击确认后，系统将<strong>再次校验</strong>并在单个数据库事务中整批写入职工数据；
+      任一冲突（含并发导入造成的职工编号重复）都会整批回滚，不会留下部分数据。</p>
+    <form method="post" class="form" data-guard-submit data-confirm="确认导入 {{ results.ok|length }} 名职工？写入前将再次整批校验。">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="confirm">
+      <input type="hidden" name="import_token" value="{{ import_token }}">
+      <div class="form-actions">
+        <button type="submit" class="btn btn-success">确认导入</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

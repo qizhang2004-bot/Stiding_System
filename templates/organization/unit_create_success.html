@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}队组创建成功 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:unit_list' %}">队组管理</a> / 创建成功</div>{% endblock %}
+{% block page_title %}队组创建成功{% endblock %}
+
+{% block content %}
+<div class="alert alert-success">队组「{{ info.org_name }}」与两个账号已全部创建完成。</div>
+
+<div class="card">
+  <div class="card-title">创建结果</div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">队组名称</div><div class="detail-value">{{ info.org_name }}</div></div>
+    <div class="detail-item"><div class="detail-label">队组编号</div><div class="detail-value">{{ info.org_code }}</div></div>
+    <div class="detail-item"><div class="detail-label">队组管理员账号</div><div class="detail-value">{{ info.admin_username }}</div></div>
+    <div class="detail-item"><div class="detail-label">普通成员账号</div><div class="detail-value">{{ info.member_username }}</div></div>
+  </div>
+
+  {% if info.admin_password or info.member_password %}
+  <div class="alert alert-warning" style="margin-top: 14px;">
+    <strong>初始密码（仅显示这一次，请立即妥善保存）：</strong>
+    {% if info.admin_password %}<div>管理员 {{ info.admin_username }}：{{ info.admin_password }}</div>{% endif %}
+    {% if info.member_password %}<div>普通成员 {{ info.member_username }}：{{ info.member_password }}</div>{% endif %}
+  </div>
+  {% else %}
+  <p class="field-help">两个账号的初始密码已由创建者设置，此处不再展示。</p>
+  {% endif %}
+
+  <div class="form-actions">
+    <a class="btn btn-primary" href="{% url 'organization:unit_detail' info.org_id %}">查看队组详情</a>
+    <a class="btn" href="{% url 'organization:unit_list' %}">返回队组列表</a>
+  </div>
+</div>
+{% endblock %}

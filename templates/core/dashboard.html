@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}系统首页 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb">工作台</div>{% endblock %}
+{% block page_title %}工作台{% endblock %}
+
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l7-4 7 4v14"></path><path d="M9 21v-4h6v4"></path></svg></div><div><div class="stat-value">{{ organization_count }}</div><div class="stat-label">队组总数</div></div></div>
+  <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></div><div><div class="stat-value">{{ team_count }}</div><div class="stat-label">班组总数</div></div></div>
+  <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div><div><div class="stat-value">{{ active_employee_count }}</div><div class="stat-label">在册职工</div></div></div>
+  <div class="stat-card"><div class="stat-icon gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle><line x1="3" y1="3" x2="21" y2="21"></line></svg></div><div><div class="stat-value">{{ inactive_employee_count }}</div><div class="stat-label">已停用职工</div></div></div>
+  <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line></svg></div><div><div class="stat-value">{{ active_config_count }}</div><div class="stat-label">已启用班次配置</div></div></div>
+</div>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <div class="card-title">排班计划状态 <span class="card-title-note">按现有排班记录状态统计</span></div>
+    {% if record_status %}
+    <div class="status-chips">
+      <div class="status-chip"><span class="chip-value">{{ record_status.draft|default:0 }}</span><span class="chip-label">草稿</span></div>
+      <div class="status-chip"><span class="chip-value">{{ record_status.confirmed|default:0 }}</span><span class="chip-label">已确认</span></div>
+      <div class="status-chip"><span class="chip-value">{{ record_status.published|default:0 }}</span><span class="chip-label">已发布</span></div>
+    </div>
+    {% else %}
+    <p class="text-muted" style="font-size: 13px;">暂无排班记录。排班算法尚未接入，暂时无法生成正式排班计划。</p>
+    {% endif %}
+    <div style="margin-top: 12px;">
+      <a class="btn btn-sm" href="{% url 'scheduler:schedule_plan' %}">进入排班计划</a>
+      <a class="btn btn-sm" href="{% url 'scheduler:schedule_results' %}">查看排班结果</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">快捷操作</div>
+    <div class="quick-actions">
+      <a class="btn" href="{% url 'organization:unit_create' %}">新增队组</a>
+      <a class="btn" href="{% url 'organization:team_create' %}">新增班组</a>
+      <a class="btn" href="{% url 'personnel:employee_create' %}">新增职工</a>
+      <a class="btn" href="{% url 'organization:shift_config_list' %}">配置班次</a>
+      <a class="btn" href="{% url 'scheduler:schedule_plan' %}">排班计划</a>
+      <a class="btn" href="{% url 'auditlog:log_list' %}">操作日志</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">排班人数趋势
+      <span class="card-title-note">
+        当前周期 {{ chart.period_start }} ~ {{ chart.period_end }} ·
+        {% if chart.is_super %}按队组 + 班次统计（图例仅用于识别班次，悬停查看当日人数）{% else %}本队组早/中/夜班与当日总人数（悬停查看当日人数）{% endif %}
+      </span>
+    </div>
+    {% if chart.empty %}
+    <p class="text-muted" style="font-size: 13px;">当前周期暂无有效排班记录（下图仍按周期日期显示 0 值）。</p>
+    {% endif %}
+    <div class="trend-chart">
+      <div id="trend-chart" role="img" aria-label="排班人数趋势图"></div>
+      <div class="trend-tooltip" id="trend-tooltip" role="status" aria-live="polite" hidden></div>
+    </div>
+    {{ chart|json_script:"trend-data" }}
+  </div>
+
+  <div class="card">
+    <div class="card-title">尚无有效班次配置的班组
+      {% if teams_without_active_config %}<span class="badge badge-warning">{{ teams_without_active_config|length }}</span>{% endif %}
+    </div>
+    {% if teams_without_active_config %}
+    <ul class="warn-list">
+      {% for team in teams_without_active_config %}
+      <li>
+        <span>{{ team.organization.name }} / {{ team.name }}</span>
+        <a class="btn btn-sm" href="{% url 'organization:shift_config_list' %}?organization={{ team.organization_id }}&team={{ team.pk }}">去配置</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted" style="font-size: 13px;">所有班组均已有启用的班次配置，暂无需提醒。</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<div class="card">
+  <div class="card-title">最近操作日志 <span class="card-title-note">最近 6 条</span>
+    <a class="btn btn-sm" href="{% url 'auditlog:log_list' %}">查看全部</a>
+  </div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>时间</th><th>用户</th><th>模块</th><th>类型</th><th>描述</th><th>IP</th></tr></thead>
+      <tbody>
+        {% for log in recent_logs %}
+        <tr>
+          <td class="cell-muted">{{ log.created_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ log.username|default:"-" }}</td>
+          <td>{{ log.module }}</td>
+          <td>{{ log.action }}</td>
+          <td class="cell-truncate">{{ log.description }}</td>
+          <td class="cell-muted">{{ log.ip_address|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">{% include "includes/_empty.html" with title="暂无操作日志" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{% static 'js/trend_chart.js' %}"></script>
+{% endblock %}

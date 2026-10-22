@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% load extras %}
+
+{% block title %}职工管理 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 人员管理 / 职工管理</div>{% endblock %}
+{% block page_title %}职工管理{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>职工管理</h2>
+    <p class="page-desc">「本周期排班数」统计当前排班周期（每月25日至次月24日）<strong>从周期第一天到今天（含）</strong>的实际排班班数，不统计未来日期；「矿上最低班数」仅用于出勤达标统计，与排班目标班数无关。</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'personnel:employee_create' %}">＋ 新增职工</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">姓名 / 工号 / 岗位</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入关键字搜索">
+    </div>
+    <div class="filter-item">
+      <label for="filter-organization">所属队组</label>
+      <select class="input" name="organization" id="filter-organization">
+        <option value="">全部队组</option>
+        {% for o in orgs %}
+        <option value="{{ o.pk }}" {% if org_id == o.pk|stringformat:"s" %}selected{% endif %}>{{ o.name }}（{{ o.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="filter-team">所属班组</label>
+      <select class="input" name="team" id="filter-team" data-cascade-cfg="#filter-shift-config">
+        <option value="">全部班组</option>
+        {% for t in teams %}
+        <option value="{{ t.pk }}" {% if team_id == t.pk|stringformat:"s" %}selected{% endif %}>{{ t.name }}（{{ t.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="filter-shift-config">所属班次</label>
+      <select class="input" name="shift_config" id="filter-shift-config">
+        <option value="">全部班次</option>
+        {% for c in shift_configs %}
+        <option value="{{ c.pk }}" {% if shift_id == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.get_shift_name_display }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="status">启用状态</label>
+      <select class="input" name="status" id="status">
+        <option value="">全部</option>
+        <option value="active" {% if status == 'active' %}selected{% endif %}>在岗</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>停用</option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'personnel:employee_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="sortable"><a class="{% if sort == 'employee_no' or sort == '-employee_no' %}current{% endif %}" href="{% querystring sort='-employee_no' %}">工号</a></th>
+          <th class="sortable"><a class="{% if sort == 'name' or sort == '-name' %}current{% endif %}" href="{% querystring sort='-name' %}">姓名</a></th>
+          <th>所属队组</th>
+          <th>所属班组</th>
+          <th>岗位</th>
+          <th>所属班次</th>
+          <th class="num">本周期排班数<br><span class="cell-muted">周期开始至今天 · 有效记录</span></th>
+          <th class="num sortable"><a class="{% if sort == 'min_required_shifts' or sort == '-min_required_shifts' %}current{% endif %}" href="{% querystring sort='-min_required_shifts' %}" title="矿上规定的最低出勤班数，仅用于达标统计">矿上最低班数</a></th>
+          <th>状态</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in page_obj %}
+        <tr>
+          <td>{{ emp.employee_no }}</td>
+          <td><a href="{% url 'personnel:employee_detail' emp.pk %}">{{ emp.name }}</a></td>
+          <td>{{ emp.team.organization.name|default:"-" }}</td>
+          <td>{{ emp.team.name|default:"-" }}</td>
+          <td>{{ emp.position|default:"-" }}</td>
+          <td>{% if emp.shift_config %}<span class="shift-tag {% if emp.shift_config.shift_name == 'early' %}shift-early{% elif emp.shift_config.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ emp.shift_config.get_shift_name_display }}</span>{% else %}-{% endif %}</td>
+          <td class="num">{% with n=scheduled_counts|get_item:emp.pk %}{{ n }}{% endwith %}</td>
+          <td class="num">{{ emp.min_required_shifts }}</td>
+          <td>{% if emp.is_active %}<span class="badge badge-success">在岗</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'personnel:employee_detail' emp.pk %}">详情</a>
+          <a class="btn btn-sm" href="{% url 'personnel:employee_calendar' emp.pk %}">日历</a>
+            <a class="btn btn-sm" href="{% url 'personnel:employee_edit' emp.pk %}">编辑</a>
+            <form class="inline-form" method="post" action="{% url 'personnel:employee_toggle' emp.pk %}"
+                  data-confirm="{% if emp.is_active %}确认停用职工「{{ emp.name }}」？停用后历史排班记录仍可查询。{% else %}确认重新启用职工「{{ emp.name }}」？{% endif %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm {% if emp.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                {% if emp.is_active %}停用{% else %}启用{% endif %}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10">
+          {% include "includes/_empty.html" with title="暂无职工" description="调整筛选条件，或新增职工。也可以通过「职工导入」批量准备数据。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

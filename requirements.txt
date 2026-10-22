@@ -1,0 +1,16 @@
+# Web 框架
+Django>=5.2,<6.0
+
+# 排班求解引擎
+ortools>=9.7
+
+# 数据处理
+openpyxl>=3.1
+python-dotenv>=1.0
+
+# MySQL 驱动（settings 中 DB_NAME 存在时启用 MySQL）
+PyMySQL>=1.1
+
+# 生产部署
+gunicorn>=21
+whitenoise>=6.6

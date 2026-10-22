@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}{% if editing %}编辑队组{% else %}新增队组{% endif %} - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:unit_list' %}">队组管理</a> / {% if editing %}编辑队组{% else %}新增队组{% endif %}</div>{% endblock %}
+{% block page_title %}{% if editing %}编辑队组{% else %}新增队组{% endif %}{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 720px;">
+  <form method="post" class="form" data-guard-submit>
+    {% csrf_token %}
+    <div class="form-grid">
+      {% include "includes/_form_fields.html" %}
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <a class="btn" href="{% url 'organization:unit_list' %}">取消</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

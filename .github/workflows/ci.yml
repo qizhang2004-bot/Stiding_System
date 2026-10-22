@@ -1,0 +1,95 @@
+name: CI
+
+# 自动测试：推送默认分支、Pull Request、以及手动触发。
+# 说明：本工作流只做“检查 + 测试”，不部署；部署由既有 Deploy.yml 负责。
+on:
+  push:
+    # 默认分支必跑；其他分支推送也运行，便于合并前先验证
+    branches:
+      - main
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+# 最小权限：只读取仓库内容
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Django 检查与测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      # 独立测试数据库：仅本工作流使用，绝不连接生产库
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: stiding_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h127.0.0.1 -uroot -pci-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+          --health-start-period=20s
+
+    env:
+      # 仅用于 CI 的临时值，不是生产密钥
+      DJANGO_SECRET_KEY: ci-only-insecure-secret-key
+      DJANGO_DEBUG: "1"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost"
+      DB_NAME: stiding_ci
+      DB_USER: root
+      DB_PASSWORD: ci-root-password
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      # 缩短软目标限时，保证测试稳定在分钟级
+      SCHEDULER_SOFT_STAGE_SECONDS: "2"
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 等待 MySQL 就绪
+        run: |
+          python - <<'PY'
+          import socket, time
+          for _ in range(60):
+              try:
+                  with socket.create_connection(("127.0.0.1", 3306), timeout=2):
+                      print("MySQL 可连接")
+                      break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit("MySQL 未在预期时间内就绪")
+          PY
+
+      - name: Django 系统检查
+        run: python manage.py check
+
+      - name: 迁移变更检查
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: 运行完整测试（隔离测试库）
+        run: python manage.py test --noinput

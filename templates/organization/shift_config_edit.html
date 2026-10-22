@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% load static %}
+{% load extras %}
+
+{% block title %}{{ config.team.name }} · {{ config.get_shift_name_display }} 配置 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 排班管理 / <a href="{% url 'organization:shift_config_list' %}">班次配置</a> / {{ config.team.name }} · {{ config.get_shift_name_display }}</div>{% endblock %}
+{% block page_title %}班次配置 · {{ team.organization.name }} / {{ team.name }} · {{ config.get_shift_name_display }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>
+      <span class="shift-tag {% if config.shift_name == 'early' %}shift-early{% elif config.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ config.get_shift_name_display }}</span>
+      {{ team.organization.name }} / {{ team.name }}
+      {% if config.is_active %}<span class="badge badge-success">已启用</span>{% else %}<span class="badge badge-warning">待配置</span>{% endif %}
+    </h2>
+    <p class="page-desc">配置该班次的基本参数、岗位要求人数与豁免职工。</p>
+  </div>
+  <div>
+    {% for sibling in siblings %}
+      <a class="btn btn-sm {% if sibling.pk == config.pk %}btn-primary{% endif %}" href="{% url 'organization:shift_config_edit' sibling.pk %}">{{ sibling.get_shift_name_display }}</a>
+    {% endfor %}
+    <form class="inline-form" method="post" action="{% url 'scheduler:schedule_generate' config.pk %}" data-guard-submit>
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button type="submit" class="btn btn-sm btn-success">生成并保存排班</button>
+    </form>
+    <form class="inline-form" method="post" action="{% url 'organization:shift_config_toggle' config.pk %}"
+          data-confirm="{% if config.is_active %}确认停用{{ config.get_shift_name_display }}配置？停用后该班次将不参与排班。{% else %}确认启用{{ config.get_shift_name_display }}配置？启用前系统会校验参数合法性。{% endif %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button type="submit" class="btn btn-sm {% if config.is_active %}btn-danger{% else %}btn-success{% endif %}">
+        {% if config.is_active %}停用{% else %}启用{% endif %}
+      </button>
+    </form>
+    <a class="btn btn-sm" href="{% url 'organization:shift_config_list' %}?organization={{ team.organization_id }}&team={{ team.pk }}">返回列表</a>
+  </div>
+</div>
+
+<form method="post" class="form" id="config-form" data-guard-submit>
+  {% csrf_token %}
+
+  {# ==================== 一、基本信息 ==================== #}
+  <div class="card">
+    <div class="card-title">一、基本信息</div>
+    <div class="form-grid">
+      {# 所属班组与班次名称为展示字段（不随表单提交），用实例值静态渲染，失败回显不丢失 #}
+      <div class="field">
+        <label>所属班组</label>
+        <select class="input" disabled>
+          <option selected>{{ team.organization.name }} / {{ team.name }}</option>
+        </select>
+        <p class="field-help">展示字段：所属班组不可在此修改。</p>
+      </div>
+      <div class="field">
+        <label>班次名称</label>
+        <select class="input" disabled>
+          <option selected>{{ config.get_shift_name_display }}</option>
+        </select>
+        <p class="field-help">展示字段：班次名称由班次配置决定，不可在此修改。</p>
+      </div>
+      {% for field in form %}
+        {% if field.name != 'exempt_employees' %}
+        <div class="field{% if field.errors %} field-invalid{% endif %}">
+          <label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span class="required">*</span>{% endif %}</label>
+          {{ field }}
+          {% if field.help_text %}<p class="field-help">{{ field.help_text|safe }}</p>{% endif %}
+          {% for error in field.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if form.non_field_errors %}
+    <div class="form-errors">{% for error in form.non_field_errors %}<p class="field-error">{{ error }}</p>{% endfor %}</div>
+    {% endif %}
+  </div>
+
+  {# ==================== 二、岗位人数配置 ==================== #}
+  <div class="card">
+    <div class="card-title">二、岗位人数配置 <span class="card-title-note">根据当前班次成员的实际岗位动态生成</span></div>
+    <div class="alert alert-info">
+      <strong>岗位要求人数</strong>表示当天实际安排到该岗位的人数，<strong>必须恰好满足配置值</strong>。
+      具备该岗位资格但未被安排到该岗位的职工，可按普工安排（不占用特殊岗位名额）；岗位为空/普工同样计入当天上班人数。
+      「当前具备资格人数」仅用于参考，不会自动写入要求人数。
+    </div>
+
+    {% if over_warnings %}
+    <div class="alert alert-warning">
+      <strong>人数超限提醒（不会自动修改您输入的配置）：</strong>
+      {% for warning in over_warnings %}<div>{{ warning }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>岗位</th>
+            <th class="num">当前具备资格人数</th>
+            <th class="num">要求人数</th>
+            <th>提示</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in position_rows %}
+          <tr>
+            <td><span class="badge badge-info">{{ row.name }}</span></td>
+            <td class="num">{{ row.eligible }}</td>
+            <td class="num"><input class="input pos-input" type="number" min="0" step="1" data-pos-input data-pos="{{ row.name }}" value="{{ row.required }}"></td>
+            <td class="cell-muted">
+              {% if row.required > row.eligible %}要求 {{ row.required }} 人，超过具备资格人数 {{ row.eligible }} 人{% elif row.required == 0 %}当天不要求安排该岗位{% else %}当天需恰好安排 {{ row.required }} 人{% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4">
+            {% include "includes/_empty.html" with title="当前班次暂无成员岗位" description="成员加入当前班次并填写岗位后，将在此动态生成岗位人数配置项。" %}
+          </td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if orphan_positions %}
+    <div class="alert alert-warning" style="margin-top: 12px;">
+      <strong>以下岗位配置已保存，但当前班次暂时没有成员具备该岗位资格（不会被自动删除）：</strong>
+    </div>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>岗位</th><th class="num">已保存要求人数</th><th>处理</th></tr></thead>
+        <tbody>
+          {% for name, count in orphan_positions %}
+          <tr id="orphan-row-{{ forloop.counter }}">
+            <td><span class="badge badge-muted">{{ name }}</span></td>
+            <td class="num">{{ count }}</td>
+            <td>
+              <button type="button" class="btn btn-sm btn-danger" data-orphan="{{ name }}">删除该岗位配置</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {{ position_form.position_requirements }}
+    {% for error in position_form.position_requirements.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    <p class="field-error hidden" id="pos-error"></p>
+  </div>
+
+  {# ==================== 三、豁免职工 ==================== #}
+  <div class="card">
+    <div class="card-title">三、豁免职工
+      <button type="button" class="btn btn-primary" id="exempt-open">选择豁免职工</button>
+    </div>
+    <p class="field-help" style="margin-top: -6px;">通过弹窗从当前班次的在职成员中多选。提交使用职工主键，后端会再次校验人员属于本班组。</p>
+    {% for error in form.exempt_employees.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    <div id="exempt-chips" class="exempt-chips">
+      {% for emp in selected_employees %}
+      <span class="chip" data-chip-id="{{ emp.pk }}">{{ emp.employee_no }} {{ emp.name }}<button type="button" class="chip-remove" data-chip-remove="{{ emp.pk }}" aria-label="移除">×</button></span>
+      {% empty %}
+      <span class="text-muted">暂无豁免职工</span>
+      {% endfor %}
+    </div>
+    <div class="hidden" id="exempt-checkboxes">{{ form.exempt_employees }}</div>
+  </div>
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">保存配置</button>
+  </div>
+</form>
+
+{# ==================== 排班可行性预检 ==================== #}
+<div class="card">
+  <div class="card-title">排班可行性预检 <span class="card-title-note">实时计算 · 数量级预检不等于完整求解证明</span></div>
+  <div class="import-summary">
+    <div class="summary-item"><span class="summary-count">{{ precheck.employee_count }}</span> 有效职工</div>
+    <div class="summary-item"><span class="summary-count">{{ precheck.days }}</span> 周期天数（{{ precheck.period_start|date:"m-d" }}~{{ precheck.period_end|date:"m-d" }}）</div>
+    <div class="summary-item"><span class="summary-count">{{ precheck.daily }}</span> 每日需求人数</div>
+    <div class="summary-item"><span class="summary-count">{{ precheck.total }}</span> 周期总需求人次</div>
+    <div class="summary-item"><span class="summary-count">{{ precheck.base_shifts }}</span> 普通人员最低班数</div>
+  </div>
+
+  {% if precheck.alloc.feasible %}
+  <div class="alert alert-info">
+    人多人少检查：
+    理论普通人员 <strong>{{ precheck.alloc.full_count|default_if_none:"未配置" }}</strong> 人 ·
+    理论豁免人员 <strong>{{ precheck.alloc.theoretical_exempt_count|default_if_none:"未配置" }}</strong> 人 ·
+    豁免人员剩余目标 <strong>{{ precheck.alloc.exempt_remaining_target|default_if_none:"未配置" }}</strong> 班
+    {% if precheck.alloc.mode == "surplus" %}（人多模式：名额有剩余，剩余名额优先由豁免人员承担）{% else %}（人少模式）{% endif %}
+  </div>
+  {% else %}
+  <div class="alert alert-warning">人多人少检查未通过：{% for note in precheck.alloc.notes %}<div>{{ note }}</div>{% endfor %}</div>
+  {% endif %}
+
+  {% if precheck.positions %}
+  <div class="table-scroll" style="margin-top: 10px;">
+    <table class="table">
+      <thead><tr><th>岗位</th><th class="num">每天要求人数</th><th class="num">具备资格人数</th><th>预检结论</th></tr></thead>
+      <tbody>
+        {% for pos in precheck.positions %}
+        <tr>
+          <td><span class="badge badge-info">{{ pos.name }}</span></td>
+          <td class="num">{{ pos.required }}</td>
+          <td class="num">{{ pos.qualified }}</td>
+          <td>
+            {% if pos.level == "bad" %}<span class="badge badge-danger">明确不可行</span>{% elif pos.level == "warn" %}<span class="badge badge-warning">存在风险</span>{% else %}<span class="badge badge-success">可行</span>{% endif %}
+            <span class="cell-muted">{{ pos.note }}</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="field-help">兼岗人员每天只能承担一个实际岗位，仅凭「持证人数 ≥ 需求人数」不能断言可行；请使用下方完整求解验证。</p>
+  {% else %}
+  <p class="cell-muted">未配置特殊岗位人数。</p>
+  {% endif %}
+
+  <div style="display: flex; align-items: center; gap: 12px; margin-top: 12px;">
+    <form method="post" action="{{ request.path }}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="verify">
+      <button type="submit" class="btn btn-sm">运行完整求解验证</button>
+    </form>
+    <span class="cell-muted">
+      {% if verify_result %}
+        上次完整求解验证：
+        {% if verify_result.status == "feasible" %}<span class="badge badge-success">可行</span>
+        {% elif verify_result.status == "infeasible" %}<span class="badge badge-danger">不可行</span>
+        {% else %}<span class="badge badge-warning">{{ verify_result.status }}</span>{% endif %}
+        {{ verify_result.detail }}
+      {% else %}尚未完成完整求解验证。{% endif %}
+    </span>
+  </div>
+</div>
+
+{# ==================== 四、当前班次成员 ==================== #}
+<div class="card">
+  <div class="card-title">四、当前班次成员 <span class="card-title-note">共 {{ member_total }} 人（来自本队组、班组、班次）</span></div>
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">姓名 / 工号 / 岗位</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入关键字搜索">
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'organization:shift_config_edit' config.pk %}">重置</a>
+    </div>
+  </form>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>职工编号</th><th>姓名</th><th>全部岗位</th>
+          <th class="num">已上班数</th><th class="num">矿上应上最少班数</th><th>是否豁免</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for member in member_page %}
+        <tr>
+          <td>{{ member.employee_no }}</td>
+          <td>{{ member.name }}</td>
+          <td>{% for pos in member.position_list %}<span class="badge badge-info">{{ pos }}</span> {% empty %}<span class="cell-muted">未设置岗位</span>{% endfor %}</td>
+          <td class="num">{% with n=member_scheduled_counts|get_item:member.pk %}{{ n }}{% endwith %}</td>
+          <td class="num">{{ member.min_required_shifts }}</td>
+          <td>{% if member.pk in saved_exempt_ids %}<span class="badge badge-success">豁免</span>{% else %}<span class="badge badge-muted">否</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">
+          {% include "includes/_empty.html" with title="当前班次暂无成员" description="职工在「职工管理」中选择该班次后，会显示在此列表中。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" with page_obj=member_page %}
+</div>
+
+{# ==================== 豁免职工弹窗 ==================== #}
+<div class="modal-backdrop" id="exempt-modal" aria-hidden="true">
+  <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="exempt-modal-title">
+    <div class="modal-head" id="exempt-modal-title">选择豁免职工</div>
+    <div class="modal-body">
+      <div class="exempt-toolbar">
+        <input class="input" type="search" id="exempt-search" placeholder="按姓名或职工编号搜索">
+        <button type="button" class="btn btn-sm" id="exempt-select-all">全选当前结果</button>
+        <button type="button" class="btn btn-sm" id="exempt-clear-all">取消全选</button>
+        <span class="exempt-count" id="exempt-count">已选 0 人</span>
+      </div>
+      <div class="exempt-list" id="exempt-list"></div>
+      <p class="field-help">仅显示当前队组、班组、班次的在职成员；全选只作用于当前筛选结果。</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="exempt-cancel">取消</button>
+      <button type="button" class="btn btn-primary" id="exempt-confirm">确认选择</button>
+    </div>
+  </div>
+</div>
+
+{{ candidates_json|json_script:"exempt-candidates-data" }}
+{{ all_members_json|json_script:"exempt-all-members-data" }}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/shift_config.js' %}?v=2"></script>
+{% endblock %}

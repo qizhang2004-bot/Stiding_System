@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}排班计划 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 排班管理 / 排班计划</div>{% endblock %}
+{% block page_title %}排班计划{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>排班计划</h2>
+    <p class="page-desc">排班周期为每月 25 日至次月 24 日。选择队组与班组后，可查看该班组的配置与排班准备情况。</p>
+  </div>
+</div>
+
+<div class="card period-nav">
+  <a class="btn btn-sm" href="{% querystring period=prev_period %}">‹ 上一周期</a>
+  <div class="period-current">
+    {{ start|date:"Y年m月d日" }} 至 {{ end|date:"Y年m月d日" }}
+    <small>排班周期（每月 25 日 ~ 次月 24 日）</small>
+  </div>
+  <a class="btn btn-sm" href="{% querystring period=next_period %}">下一周期 ›</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <input type="hidden" name="period" value="{{ start|date:'Y-m' }}">
+    {% if is_super %}
+      <div class="filter-item">
+      <label for="filter-organization">所属队组</label>
+      <select class="input" name="organization" id="filter-organization">
+        <option value="">请选择队组</option>
+        {% for o in orgs %}
+        <option value="{{ o.pk }}" {% if org and org.pk == o.pk %}selected{% endif %}>{{ o.name }}（{{ o.code }}）{% if not o.is_active %} · 已停用{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+      {% endif %}
+    <div class="filter-item">
+      <label for="filter-team">所属班组</label>
+      <select class="input" name="team" id="filter-team">
+        <option value="">请选择班组</option>
+        {% for t in teams %}
+        <option value="{{ t.pk }}" {% if team and team.pk == t.pk %}selected{% endif %}>{{ t.name }}（{{ t.code }}）{% if not t.is_active %} · 已停用{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查看排班准备情况</button>
+    </div>
+  </form>
+</div>
+
+{% if team %}
+<div class="stat-grid" style="grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));">
+  <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg></div><div><div class="stat-value">{{ employee_count }}</div><div class="stat-label">在岗职工</div></div></div>
+  <div class="stat-card"><div class="stat-icon gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg></div><div><div class="stat-value">{{ employee_total }}</div><div class="stat-label">职工总数</div></div></div>
+  <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line></svg></div><div><div class="stat-value">{{ active_configs|length }}/{{ configs|length }}</div><div class="stat-label">已启用班次配置</div></div></div>
+</div>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <div class="card-title">配置检查状态 <span class="card-title-note">仅展示现状，不代表排班可行性判断</span></div>
+    <ul class="config-check-list">
+      <li>
+        {% if configs|length == 3 %}<span class="ok">✓</span> 早/中/晚三条班次配置齐全（3/3）
+        {% else %}<span class="bad">✗</span> 班次配置不齐全（{{ configs|length }}/3），缺失：{{ missing_config_names|join:"、" }}{% endif %}
+      </li>
+      <li>
+        {% if active_configs|length == configs|length and configs %}<span class="ok">✓</span> 全部配置已启用（{{ active_configs|length }}/{{ configs|length }}）
+        {% else %}<span class="bad">!</span> 已启用 {{ active_configs|length }}/{{ configs|length }} 条，未启用：{% for c in inactive_configs %}{{ c.get_shift_name_display }} {% endfor %}{% endif %}
+      </li>
+      <li><span class="ok">✓</span> 排班周期：{{ start|date:"Y-m-d" }} ~ {{ end|date:"Y-m-d" }}</li>
+      <li><span class="ok">✓</span> 排班可行性检查：生成排班时实时校验（每日人数、岗位资格、休息规则），配置不足会明确提示。</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <div class="card-title">班次配置概览 <span class="card-title-note">每日用工人数 / 目标班数</span></div>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>班次</th><th class="num">每日用工人数</th><th class="num">目标班数</th><th class="num">连休范围</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for cfg in configs %}
+          <tr>
+            <td><span class="shift-tag {% if cfg.shift_name == 'early' %}shift-early{% elif cfg.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ cfg.get_shift_name_display }}</span></td>
+            <td class="num">{{ cfg.daily_worker_count }}</td>
+            <td class="num">{{ cfg.required_shifts }}</td>
+            <td class="num">{{ cfg.min_consecutive_rest_days }}~{{ cfg.max_consecutive_rest_days }}</td>
+            <td>{% if cfg.is_active %}<span class="badge badge-success">已启用</span>{% else %}<span class="badge badge-warning">待配置</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">排班计划状态 <span class="card-title-note">{{ start|date:"Y-m-d" }} ~ {{ end|date:"Y-m-d" }}</span></div>
+    {% if batches %}
+    <div class="status-chips">
+      <div class="status-chip"><span class="chip-value">{{ status_distribution.draft|default:0 }}</span><span class="chip-label">草稿</span></div>
+      <div class="status-chip"><span class="chip-value">{{ status_distribution.confirmed|default:0 }}</span><span class="chip-label">已确认</span></div>
+      <div class="status-chip"><span class="chip-value">{{ status_distribution.published|default:0 }}</span><span class="chip-label">已发布</span></div>
+    </div>
+    <div class="table-scroll" style="margin-top: 12px;">
+      <table class="table">
+        <thead><tr><th>批次</th><th class="num">记录数</th><th>日期范围</th><th>状态分布</th></tr></thead>
+        <tbody>
+          {% for b in batches %}
+          <tr>
+            <td class="cell-muted">{{ b.batch_id|stringformat:"s"|slice:":8" }}</td>
+            <td class="num">{{ b.count }}</td>
+            <td class="cell-muted">{{ b.first_date|date:"Y-m-d" }} ~ {{ b.last_date|date:"Y-m-d" }}</td>
+            <td>{% for status, count in b.statuses.items %}<span class="badge badge-info">{{ status }} {{ count }}</span> {% endfor %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-muted" style="font-size: 13px;">当前周期暂无排班记录。</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">生成排班</div>
+  {% if configs %}
+  <p class="page-desc" style="margin-bottom: 12px;">选择班次生成排班：系统完成求解与独立校验后直接保存并立即生效；同一队组同一周期将替换旧的有效排班（旧记录保留为已作废）。</p>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>班次</th><th class="num">每日要求人数</th><th class="num">岗位配置项</th><th>状态</th><th class="actions">操作</th></tr>
+      </thead>
+      <tbody>
+        {% for cfg in configs %}
+        <tr>
+          <td>{{ cfg.get_shift_name_display }}</td>
+          <td class="num">{{ cfg.daily_worker_count }}</td>
+          <td class="num">{{ cfg.position_requirements|length }}</td>
+          <td>{% if cfg.is_active %}<span class="badge badge-success">已启用</span>{% else %}<span class="badge badge-warning">待配置</span>{% endif %}</td>
+          <td class="actions">
+            <form method="post" action="{% url 'scheduler:schedule_generate' cfg.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <input type="hidden" name="period" value="{{ start|date:'Y-m' }}">
+              <button type="submit" class="btn btn-sm btn-success">生成并保存排班</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="field-help">配置不完整或无法求解时，会明确提示原因（如每日人数超过职工数、岗位资格不足、求解超时等），不会静默失败。</p>
+  {% else %}
+  <p class="page-desc">该班组暂无班次配置（创建班组时系统会自动生成早/中/晚三个班次配置）。</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  {% include "includes/_empty.html" with title="请选择队组和班组" description="选择后查看该班组的排班准备情况与计划状态。" %}
+</div>
+{% endif %}
+{% endblock %}

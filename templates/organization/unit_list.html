@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}队组管理 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / 队组管理</div>{% endblock %}
+{% block page_title %}队组管理{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>队组管理</h2>
+    <p class="page-desc">管理队组基本信息。停用队组不会删除其历史数据，仅停止后续使用。</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'organization:unit_create' %}">＋ 新增队组</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">名称 / 编号</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入名称或编号搜索">
+    </div>
+    <div class="filter-item">
+      <label for="status">启用状态</label>
+      <select class="input" name="status" id="status">
+        <option value="">全部（{{ active_count|add:inactive_count }}）</option>
+        <option value="active" {% if status == 'active' %}selected{% endif %}>启用（{{ active_count }}）</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>停用（{{ inactive_count }}）</option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'organization:unit_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>队组名称</th>
+          <th>队组编号</th>
+          <th class="num">班组数</th>
+          <th>状态</th>
+          <th>创建时间</th>
+          <th>更新时间</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for unit in page_obj %}
+        <tr>
+          <td><a href="{% url 'organization:unit_detail' unit.pk %}">{{ unit.name }}</a></td>
+          <td>{{ unit.code }}</td>
+          <td class="num">{{ unit.team_count }}</td>
+          <td>
+            {% if unit.is_active %}<span class="badge badge-success">启用</span>
+            {% else %}<span class="badge badge-muted">停用</span>{% endif %}
+          </td>
+          <td class="cell-muted">{{ unit.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="cell-muted">{{ unit.updated_at|date:"Y-m-d H:i" }}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'organization:unit_detail' unit.pk %}">详情</a>
+            <a class="btn btn-sm" href="{% url 'organization:unit_edit' unit.pk %}">编辑</a>
+            <form class="inline-form" method="post" action="{% url 'organization:unit_toggle' unit.pk %}"
+                  data-confirm="{% if unit.is_active %}确认停用队组「{{ unit.name }}」？停用后不影响历史数据。{% else %}确认重新启用队组「{{ unit.name }}」？{% endif %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm {% if unit.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                {% if unit.is_active %}停用{% else %}启用{% endif %}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">
+          {% include "includes/_empty.html" with title="暂无队组" description="创建第一个队组，开始搭建组织架构。" action_url=None %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

@@ -1,0 +1,235 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Stiding 排班系统{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{% static 'favicon.svg' %}">
+  <link rel="stylesheet" href="{% static 'css/base.css' %}">
+  <link rel="stylesheet" href="{% static 'css/components.css' %}">
+  <link rel="stylesheet" href="{% static 'css/pages.css' %}">
+  {% block extra_css %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+        <line x1="8" y1="9" x2="8" y2="15"></line>
+        <line x1="12" y1="9" x2="12" y2="15"></line>
+        <line x1="16" y1="9" x2="16" y2="15"></line>
+      </svg>
+      <div class="brand-text">
+        <div class="brand-name">Stiding</div>
+        <div class="brand-sub">煤矿排班管理系统</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      {% with ns=request.resolver_match.namespace name=request.resolver_match.url_name %}
+      {% if user_role == 'super' %}
+      <div class="nav-group">
+        <div class="nav-group-title">工作台</div>
+        <a class="nav-item {% if ns == 'core' %}active{% endif %}" href="{% url 'core:dashboard' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <span>系统首页</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">组织管理</div>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':4' == 'unit' %}active{% endif %}" href="{% url 'organization:unit_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"></path><path d="M5 21V7l7-4 7 4v14"></path><path d="M9 21v-4h6v4"></path><path d="M9 10h.01M15 10h.01"></path></svg>
+          <span>队组管理</span>
+        </a>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':4' == 'team' %}active{% endif %}" href="{% url 'organization:team_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>班组管理</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">人员管理</div>
+        <a class="nav-item {% if ns == 'personnel' and name == 'employee_list' %}active{% endif %}" href="{% url 'personnel:employee_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          <span>职工管理</span>
+        </a>
+        <a class="nav-item {% if ns == 'personnel' and name == 'employee_import' %}active{% endif %}" href="{% url 'personnel:employee_import' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>职工导入</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">排班管理</div>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':12' == 'shift_config' %}active{% endif %}" href="{% url 'organization:shift_config_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+          <span>班次配置</span>
+        </a>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'schedule_plan' %}active{% endif %}" href="{% url 'scheduler:schedule_plan' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <span>排班计划</span>
+        </a>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'schedule_results' %}active{% endif %}" href="{% url 'scheduler:schedule_results' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg>
+          <span>排班结果</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">账号管理</div>
+        <a class="nav-item {% if ns == 'accounts' and name|slice:':4' == 'user' %}active{% endif %}" href="{% url 'accounts:user_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>账号管理</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">系统管理</div>
+        <a class="nav-item {% if ns == 'auditlog' %}active{% endif %}" href="{% url 'auditlog:log_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+          <span>操作日志</span>
+        </a>
+        <a class="nav-item" href="{% url 'admin:index' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>后台管理</span>
+        </a>
+      </div>
+      {% elif user_role == 'admin' %}
+      <div class="nav-group">
+        <div class="nav-group-title">工作台</div>
+        <a class="nav-item {% if ns == 'core' %}active{% endif %}" href="{% url 'core:dashboard' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <span>系统首页</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">组织管理</div>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':4' == 'unit' %}active{% endif %}" href="{% url 'organization:unit_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"></path><path d="M5 21V7l7-4 7 4v14"></path><path d="M9 21v-4h6v4"></path><path d="M9 10h.01M15 10h.01"></path></svg>
+          <span>本队组信息</span>
+        </a>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':4' == 'team' %}active{% endif %}" href="{% url 'organization:team_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>班组管理</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">人员管理</div>
+        <a class="nav-item {% if ns == 'personnel' and name == 'employee_list' %}active{% endif %}" href="{% url 'personnel:employee_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          <span>职工管理</span>
+        </a>
+        <a class="nav-item {% if ns == 'personnel' and name == 'employee_import' %}active{% endif %}" href="{% url 'personnel:employee_import' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+          <span>职工导入</span>
+        </a>
+        <a class="nav-item {% if ns == 'personnel' and name == 'person_board' %}active{% endif %}" href="{% url 'personnel:person_board' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
+          <span>个人信息看板</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">排班管理</div>
+        <a class="nav-item {% if ns == 'organization' and name|slice:':12' == 'shift_config' %}active{% endif %}" href="{% url 'organization:shift_config_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+          <span>班次配置</span>
+        </a>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'schedule_plan' %}active{% endif %}" href="{% url 'scheduler:schedule_plan' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <span>排班计划</span>
+        </a>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'schedule_results' %}active{% endif %}" href="{% url 'scheduler:schedule_results' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line></svg>
+          <span>排班结果</span>
+        </a>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'shift_board' %}active{% endif %}" href="{% url 'scheduler:shift_board' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <span>班次看板</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">账号</div>
+        <a class="nav-item {% if ns == 'accounts' and name|slice:':6' == 'member' %}active{% endif %}" href="{% url 'accounts:member_list' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>成员账号管理</span>
+        </a>
+      </div>
+      {% else %}
+      <div class="nav-group">
+        <div class="nav-group-title">看板</div>
+        <a class="nav-item {% if ns == 'scheduler' and name == 'shift_board' %}active{% endif %}" href="{% url 'scheduler:shift_board' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <span>班次看板</span>
+        </a>
+        <a class="nav-item {% if ns == 'personnel' and name == 'person_board' %}active{% endif %}" href="{% url 'personnel:person_board' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
+          <span>个人信息看板</span>
+        </a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-title">账户</div>
+        <a class="nav-item {% if ns == 'accounts' and name == 'password_change' %}active{% endif %}" href="{% url 'accounts:password_change' %}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span>修改密码</span>
+        </a>
+      </div>
+      {% endif %}
+      {% endwith %}
+    </nav>
+
+    <button class="sidebar-toggle" id="sidebar-toggle" type="button" title="收起/展开侧边栏" aria-label="收起或展开侧边栏">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"></polyline><polyline points="18 17 13 12 18 7"></polyline></svg>
+    </button>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        {% block breadcrumb %}{% endblock %}
+        <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+      </div>
+      <div class="topbar-right">
+        {% if user.is_authenticated %}
+        <div class="user-chip">
+          <span class="user-avatar">{{ user.username|first|upper }}</span>
+          <span class="user-name">{{ user.username }}{% if user_org %} · {{ user_org.name }}{% endif %}</span>
+        </div>
+        <a class="btn btn-sm" href="{% url 'accounts:password_change' %}">修改密码</a>
+        <form method="post" action="{% url 'accounts:logout' %}" class="inline-form">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-sm">退出登录</button>
+        </form>
+        {% else %}
+        <a class="btn btn-sm" href="{% url 'accounts:login' %}">登录</a>
+        {% endif %}
+      </div>
+    </header>
+
+    <main class="content">
+      {% if messages %}
+      <div class="toasts" aria-live="polite">
+        {% for message in messages %}
+        <div class="toast toast-{{ message.tags|default:'info' }}">
+          <span>{{ message }}</span>
+          <button type="button" class="toast-close" aria-label="关闭">×</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">Stiding 煤矿排班管理系统 · Django</footer>
+  </div>
+</div>
+
+{% include "includes/_confirm_modal.html" %}
+<script>
+  window.CASCADE_URLS = {
+    teams: "{% url 'organization:teams_json' %}",
+    shiftConfigs: "{% url 'organization:shift_configs_json' %}"
+  };
+</script>
+<script src="{% static 'js/main.js' %}"></script>
+<script src="{% static 'js/cascade.js' %}"></script>
+<script src="{% static 'js/schedule.js' %}"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

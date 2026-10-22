@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}成员账号管理 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 成员账号管理</div>{% endblock %}
+{% block page_title %}成员账号管理{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>成员账号管理</h2>
+    <p class="page-desc">管理本队组（{% if org %}{{ org.name }}{% endif %}）的普通成员账号。只能创建本队组的普通成员账号，不能创建管理员或超级管理员。</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'accounts:member_create' %}">＋ 创建成员账号</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">登录账号</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入登录账号搜索">
+    </div>
+    <div class="filter-item">
+      <label for="status">状态</label>
+      <select class="input" name="status" id="status">
+        <option value="">全部</option>
+        <option value="active" {% if status == 'active' %}selected{% endif %}>启用</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>停用</option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'accounts:member_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>登录账号</th>
+          <th>状态</th>
+          <th>创建时间</th>
+          <th>最近登录</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for profile in page_obj %}
+        <tr>
+          <td>{{ profile.user.username }}</td>
+          <td>{% if profile.user.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-danger">停用</span>{% endif %}</td>
+          <td class="cell-muted">{{ profile.user.date_joined|date:"Y-m-d H:i" }}</td>
+          <td class="cell-muted">{% if profile.user.last_login %}{{ profile.user.last_login|date:"Y-m-d H:i" }}{% else %}从未登录{% endif %}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'accounts:member_reset_password' profile.pk %}">重置密码</a>
+            <form class="inline-form" method="post" action="{% url 'accounts:member_toggle' profile.pk %}"
+                  data-confirm="{% if profile.user.is_active %}确认停用成员账号「{{ profile.user.username }}」？{% else %}确认恢复成员账号「{{ profile.user.username }}」？{% endif %}">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-sm {% if profile.user.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                {% if profile.user.is_active %}停用{% else %}恢复{% endif %}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">
+          {% include "includes/_empty.html" with title="暂无成员账号" description="点击右上角“创建成员账号”添加本队组的只读成员账号。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

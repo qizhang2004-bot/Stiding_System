@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}确认创建队组 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:unit_list' %}">队组管理</a> / 确认创建</div>{% endblock %}
+{% block page_title %}确认创建队组{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">第四步 · 确认摘要 <span class="card-title-note">确认无误后提交，队组与两个账号将一并创建（同一事务）</span></div>
+
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">队组名称</div><div class="detail-value">{{ data.name }}</div></div>
+    <div class="detail-item"><div class="detail-label">队组编号</div><div class="detail-value">{{ data.code }}</div></div>
+    <div class="detail-item"><div class="detail-label">启用状态</div><div class="detail-value">{% if data.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">队组管理员账号</div><div class="detail-value">{{ data.admin_username }}</div></div>
+    <div class="detail-item"><div class="detail-label">管理员初始密码</div><div class="detail-value">{% if data.admin_password_generated %}<span class="badge badge-info">系统生成，成功后显示一次</span>{% else %}已由创建者设置{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">普通成员账号</div><div class="detail-value">{{ data.member_username }}</div></div>
+    <div class="detail-item"><div class="detail-label">成员初始密码</div><div class="detail-value">{% if data.member_password_generated %}<span class="badge badge-info">系统生成，成功后显示一次</span>{% else %}已由创建者设置{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">创建后自动绑定</div><div class="detail-value">两个账号自动绑定到队组「{{ data.name }}」</div></div>
+  </div>
+
+  <form method="post" class="form-actions" data-guard-submit>
+    {% csrf_token %}
+    <button type="submit" class="btn btn-primary">确认创建</button>
+    <a class="btn" href="{% url 'organization:unit_create' %}">返回修改</a>
+  </form>
+</div>
+{% endblock %}

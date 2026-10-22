@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}{% if editing %}编辑职工{% else %}新增职工{% endif %} - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 人员管理 / <a href="{% url 'personnel:employee_list' %}">职工管理</a> / {% if editing %}编辑职工{% else %}新增职工{% endif %}</div>{% endblock %}
+{% block page_title %}{% if editing %}编辑职工{% else %}新增职工{% endif %}{% endblock %}
+
+{% block content %}
+<div class="alert alert-info">
+  <strong>说明：</strong>班次配置只能选择「所属班组」下的班次；「矿上最低班数」仅用于出勤达标统计，排班目标班数在「班次配置」中设置，两者互不影响。
+</div>
+<div class="card" style="max-width: 860px;">
+  <form method="post" class="form" data-guard-submit>
+    {% csrf_token %}
+    <div class="form-grid">
+      {% include "includes/_form_fields.html" %}
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <a class="btn" href="{% url 'personnel:employee_list' %}">取消</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

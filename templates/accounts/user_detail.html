@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}账号详情 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / <a href="{% url 'accounts:user_list' %}">账号管理</a> / {{ profile.user.username }}</div>{% endblock %}
+{% block page_title %}账号详情{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">基本信息
+    <span>
+      <a class="btn btn-sm" href="{% url 'accounts:user_edit' profile.pk %}">编辑</a>
+      <a class="btn btn-sm" href="{% url 'accounts:user_reset_password' profile.pk %}">重置密码</a>
+      <form class="inline-form" method="post" action="{% url 'accounts:user_toggle' profile.pk %}"
+            data-confirm="{% if profile.user.is_active %}确认停用账号「{{ profile.user.username }}」？{% else %}确认恢复账号「{{ profile.user.username }}」？{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="btn btn-sm {% if profile.user.is_active %}btn-danger{% else %}btn-success{% endif %}">
+          {% if profile.user.is_active %}停用{% else %}恢复{% endif %}
+        </button>
+      </form>
+    </span>
+  </div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">登录账号</div><div class="detail-value">{{ profile.user.username }}</div></div>
+    <div class="detail-item"><div class="detail-label">账号角色</div><div class="detail-value">{{ profile.get_role_display }}</div></div>
+    <div class="detail-item"><div class="detail-label">所属队组</div><div class="detail-value">{{ profile.organization.name|default:"-" }}</div></div>
+    <div class="detail-item"><div class="detail-label">状态</div><div class="detail-value">{% if profile.user.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-danger">停用</span>{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">创建时间</div><div class="detail-value cell-muted">{{ profile.user.date_joined|date:"Y-m-d H:i" }}</div></div>
+    <div class="detail-item"><div class="detail-label">最近登录</div><div class="detail-value cell-muted">{% if profile.user.last_login %}{{ profile.user.last_login|date:"Y-m-d H:i" }}{% else %}从未登录{% endif %}</div></div>
+  </div>
+  <p class="field-help" style="margin-top: 12px;">密码始终以 Django 安全哈希保存，任何页面都不会展示密码或密码哈希。</p>
+</div>
+{% endblock %}

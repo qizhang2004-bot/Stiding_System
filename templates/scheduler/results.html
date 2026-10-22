@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% load extras %}
+
+{% block title %}排班结果 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 排班管理 / 排班结果</div>{% endblock %}
+{% block page_title %}排班结果{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>排班结果</h2>
+    <p class="page-desc">按排班周期（每月 25 日至次月 24 日）与批次查看排班结果。表格支持横向滚动，职工与岗位列固定显示。</p>
+  </div>
+  <button type="button" class="btn" id="preview-toggle">查看布局示例</button>
+</div>
+
+<div class="card period-nav">
+  <a class="btn btn-sm" href="{% querystring period=prev_period %}">‹ 上一周期</a>
+  <div class="period-current">
+    {{ start|date:"Y年m月d日" }} 至 {{ end|date:"Y年m月d日" }}
+    <small>排班周期（每月 25 日 ~ 次月 24 日）</small>
+  </div>
+  <a class="btn btn-sm" href="{% querystring period=next_period %}">下一周期 ›</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <input type="hidden" name="period" value="{{ start|date:'Y-m' }}">
+    {% if is_super %}
+      <div class="filter-item">
+      <label for="filter-organization">所属队组</label>
+      <select class="input" name="organization" id="filter-organization">
+        <option value="">请选择队组</option>
+        {% for o in orgs %}
+        <option value="{{ o.pk }}" {% if org and org.pk == o.pk %}selected{% endif %}>{{ o.name }}（{{ o.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+      {% endif %}
+    <div class="filter-item">
+      <label for="filter-team">所属班组</label>
+      <select class="input" name="team" id="filter-team">
+        <option value="">请选择班组</option>
+        {% for t in teams %}
+        <option value="{{ t.pk }}" {% if team and team.pk == t.pk %}selected{% endif %}>{{ t.name }}（{{ t.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if team %}
+    <div class="filter-item">
+      <label for="batch">排班批次</label>
+      <select class="input" name="batch" id="batch" onchange="this.form.submit()">
+        {% for b in batches %}
+        <option value="{{ b.batch_id }}" {% if selected_batch and selected_batch.batch_id == b.batch_id %}selected{% endif %}>
+          批次 {{ b.batch_id|stringformat:"s"|slice:":8" }}（{{ b.count }} 条 · {{ b.first_date|date:"m-d" }}~{{ b.last_date|date:"m-d" }}）
+          {% if b.is_current %}· 当前版本{% elif b.is_archived %}· 已归档{% elif b.is_manual %}· 人工记录{% else %}· 历史版本{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+    </div>
+  </form>
+</div>
+
+{% if team and grid and grid.record_count %}
+<div class="card">
+  <div class="card-title">
+    排班表 · {{ org.name }} / {{ team.name }} · 批次 {{ selected_batch.batch_id|stringformat:"s"|slice:":8" }}
+    <span class="card-title-note">
+      共 {{ grid.record_count }} 条记录 ·
+      {% for status, count in selected_batch.statuses.items %}{{ status_labels|get_item:status }} {{ count }} {% endfor %}
+    </span>
+  </div>
+  <div class="schedule-legend" style="margin-bottom: 10px;">
+    <span class="legend-item"><span class="legend-swatch shift-early"></span>早班</span>
+    <span class="legend-item"><span class="legend-swatch shift-middle"></span>中班</span>
+    <span class="legend-item"><span class="legend-swatch shift-night"></span>夜班</span>
+    <span class="legend-item"><span class="legend-swatch shift-rest"></span>休息</span>
+    <span class="legend-item text-muted">周末底色加深 · 每月 25 日为周期分界 · 今天高亮</span>
+  </div>
+  <div class="schedule-wrap">
+    <table class="schedule-grid">
+      <thead>
+        <tr>
+          <th class="sticky-col">职工</th>
+          <th class="sticky-col">岗位</th>
+          {% for d in grid.dates %}
+          <th class="date-head {% if d.is_weekend %}weekend{% endif %} {% if d.is_today %}today{% endif %} {% if d.is_month_boundary %}month-boundary{% endif %}">
+            {{ d.month_label }}<span class="weekday">{{ d.weekday_label }}</span>
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in grid.rows %}
+        <tr>
+          <td class="sticky-col">
+            {{ row.employee.name }}
+            {% if not row.employee.is_active %}<span class="badge badge-muted">停用</span>{% endif %}
+          </td>
+          <td class="sticky-col cell-muted">{{ row.employee.position|default:"-" }}</td>
+          {% for cell in row.cells %}
+          <td class="{% if cell.css_class %}{{ cell.css_class }}{% endif %}">
+            {{ cell.label }}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td class="sticky-col" style="font-weight:600;">每日排班人数</td>
+          <td class="sticky-col"></td>
+          {% for d in grid.dates %}
+          <td class="{% if d.is_weekend %}weekend{% endif %} {% if d.is_month_boundary %}month-boundary{% endif %}">{{ d.daily_count }}</td>
+          {% endfor %}
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <div class="card-title">各班次人数统计</div>
+    <div class="status-chips">
+      <div class="status-chip"><span class="chip-value" style="color:#1d4ed8;">{{ grid.shift_counts.early }}</span><span class="chip-label">早班</span></div>
+      <div class="status-chip"><span class="chip-value" style="color:#b45309;">{{ grid.shift_counts.middle }}</span><span class="chip-label">中班</span></div>
+      <div class="status-chip"><span class="chip-value" style="color:#4338ca;">{{ grid.shift_counts.night }}</span><span class="chip-label">夜班</span></div>
+      <div class="status-chip"><span class="chip-value">{{ grid.shift_counts.rest }}</span><span class="chip-label">休息</span></div>
+    </div>
+    <div class="card-title" style="margin-top: 14px;">各岗位排班人数</div>
+    {% if grid.position_counts %}
+    <div class="status-chips">
+      {% for position, count in grid.position_counts.items %}
+      <div class="status-chip"><span class="chip-value">{{ count }}</span><span class="chip-label">{{ position }}</span></div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted" style="font-size: 13px;">暂无岗位数据。</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">职工班数与连续情况 <span class="card-title-note">按排班记录统计（非真实考勤）</span></div>
+    <div class="table-scroll" style="max-height: 420px; overflow-y: auto;">
+      <table class="table">
+        <thead><tr><th>职工</th><th class="num">早</th><th class="num">中</th><th class="num">夜</th><th class="num">休</th><th class="num">合计</th><th class="num">最长连班</th><th class="num">最长连休</th></tr></thead>
+        <tbody>
+          {% for row in grid.rows %}
+          <tr>
+            <td>{{ row.employee.name }}</td>
+            <td class="num">{{ row.stat.early }}</td>
+            <td class="num">{{ row.stat.middle }}</td>
+            <td class="num">{{ row.stat.night }}</td>
+            <td class="num">{{ row.stat.rest }}</td>
+            <td class="num">{{ row.stat.work }}</td>
+            <td class="num">{{ row.stat.max_work_streak }}</td>
+            <td class="num">{{ row.stat.max_rest_streak }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">排班异常提醒</div>
+  <p class="text-muted" style="font-size: 13px;">当前阶段尚未定义排班异常规则，暂无提醒。</p>
+</div>
+{% else %}
+<div class="card">
+  {% include "includes/_empty.html" with title="当前周期暂无排班记录" description="排班算法尚未接入，暂时无法生成正式排班计划。接入算法后，此处将展示每日班次安排。" %}
+</div>
+{% endif %}
+
+<div class="preview-box hidden" id="schedule-preview">
+  <span class="preview-watermark">布局示例 · 非真实数据</span>
+  <div class="card">
+    <div class="card-title">排班表布局示例 <span class="card-title-note">仅用于预览未来布局，数据为前端示例，未写入数据库</span></div>
+    <div class="schedule-wrap"></div>
+  </div>
+</div>
+{{ dates_json|json_script:"preview-dates" }}
+{% endblock %}

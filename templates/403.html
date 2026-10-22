@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}无权限 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb">访问受限</div>{% endblock %}
+{% block page_title %}无权限{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 640px; text-align: center; padding: 48px 24px;">
+  <div class="empty-state" style="padding: 0;">
+    <h3>您没有访问该页面的权限</h3>
+    <p>{% if exception %}{{ exception }}{% else %}当前账号的角色不允许访问此功能，或该数据不在您的权限范围内。{% endif %}</p>
+    <a class="btn btn-primary" href="{% url 'accounts:home' %}">返回我的首页</a>
+  </div>
+</div>
+{% endblock %}

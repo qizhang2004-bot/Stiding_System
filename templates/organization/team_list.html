@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}班组管理 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / 班组管理</div>{% endblock %}
+{% block page_title %}班组管理{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>班组管理</h2>
+    <p class="page-desc">班组隶属于队组。创建班组时会自动生成早/中/晚三条班次配置（待配置状态），需在“班次配置”中完成参数设置并启用。</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'organization:team_create' %}">＋ 新增班组</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">名称 / 编号</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入班组名称或编号搜索">
+    </div>
+    <div class="filter-item">
+      <label for="organization">所属队组</label>
+      <select class="input" name="organization" id="organization">
+        <option value="">全部队组</option>
+        {% for org in orgs %}
+        <option value="{{ org.pk }}" {% if org_id == org.pk|stringformat:"s" %}selected{% endif %}>{{ org.name }}（{{ org.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="status">启用状态</label>
+      <select class="input" name="status" id="status">
+        <option value="">全部</option>
+        <option value="active" {% if status == 'active' %}selected{% endif %}>启用</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>停用</option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'organization:team_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>班组名称</th>
+          <th>班组编号</th>
+          <th>所属队组</th>
+          <th class="num">职工数</th>
+          <th class="num">已启用配置</th>
+          <th>状态</th>
+          <th>创建时间</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for team in page_obj %}
+        <tr>
+          <td><a href="{% url 'organization:team_detail' team.pk %}">{{ team.name }}</a></td>
+          <td>{{ team.code }}</td>
+          <td>{{ team.organization.name }}</td>
+          <td class="num">{{ team.employee_count }}</td>
+          <td class="num">{{ team.active_configs }}/3</td>
+          <td>{% if team.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</td>
+          <td class="cell-muted">{{ team.created_at|date:"Y-m-d H:i" }}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'organization:team_detail' team.pk %}">详情</a>
+            <a class="btn btn-sm" href="{% url 'organization:team_edit' team.pk %}">编辑</a>
+            <form class="inline-form" method="post" action="{% url 'organization:team_toggle' team.pk %}"
+                  data-confirm="{% if team.is_active %}确认停用班组「{{ team.name }}」？停用后不影响历史数据。{% else %}确认重新启用班组「{{ team.name }}」？{% endif %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm {% if team.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                {% if team.is_active %}停用{% else %}启用{% endif %}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8">
+          {% include "includes/_empty.html" with title="暂无班组" description="创建班组后系统会自动生成早/中/晚三条班次配置。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}{% if editing %}编辑班组{% else %}新增班组{% endif %} - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:team_list' %}">班组管理</a> / {% if editing %}编辑班组{% else %}新增班组{% endif %}</div>{% endblock %}
+{% block page_title %}{% if editing %}编辑班组{% else %}新增班组{% endif %}{% endblock %}
+
+{% block content %}
+{% if not editing %}
+<div class="alert alert-info">创建班组后，系统会自动初始化早班、中班、晚班三条班次配置（待配置状态，不会用于正式排班）。请随后在「排班管理 → 班次配置」中完成参数设置并启用。</div>
+{% endif %}
+<div class="card" style="max-width: 720px;">
+  <form method="post" class="form" data-guard-submit>
+    {% csrf_token %}
+    <div class="form-grid">
+      {% include "includes/_form_fields.html" %}
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <a class="btn" href="{% url 'organization:team_list' %}">取消</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

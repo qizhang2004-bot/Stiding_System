@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% load extras %}
+
+{% block title %}个人信息看板 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'accounts:home' %}">首页</a> / 个人信息看板</div>{% endblock %}
+{% block page_title %}个人信息看板{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>个人信息看板（只读）</h2>
+    <p class="page-desc">
+      展示本队组允许公开的职工信息。{% if org %}所属队组：{{ org.name }}{% endif %}。
+      「本周期排班数」为该职工在当前排班周期（每月 25 日至次月 24 日）内、从周期第一天到今天（含）的有效排班班数，不含休息与未来日期。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">姓名 / 岗位</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入姓名或岗位搜索">
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'personnel:person_board' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>所属班组</th>
+          <th>岗位</th>
+          <th>所属班次</th>
+          <th class="num">本周期排班数</th>
+          <th class="num">矿上最低班数</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in page_obj %}
+        <tr>
+          <td>
+            <a class="person-link" href="{% url 'personnel:employee_calendar' emp.pk %}"
+               title="查看 {{ emp.name }} 的排班日历">{{ emp.name }}</a>
+            <span class="cell-muted person-link-hint">查看日历</span>
+          </td>
+          <td>{{ emp.team.name|default:"-" }}</td>
+          <td>{{ emp.position|default:"-" }}</td>
+          <td>{% if emp.shift_config %}<span class="shift-tag {% if emp.shift_config.shift_name == 'early' %}shift-early{% elif emp.shift_config.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ emp.shift_config.get_shift_name_display }}</span>{% else %}-{% endif %}</td>
+          <td class="num">{% with n=scheduled_counts|get_item:emp.pk %}{{ n }}{% endwith %}</td>
+          <td class="num">{{ emp.min_required_shifts }}</td>
+          <td>{% if emp.is_active %}<span class="badge badge-success">在岗</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">
+          {% include "includes/_empty.html" with title="暂无职工数据" description="该队组暂无职工信息。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}

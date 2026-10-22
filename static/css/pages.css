@@ -1,0 +1,295 @@
+/* ============================================================
+   Stiding 排班管理系统 · 页面级样式（登录 / 工作台 / 排班表 / 导入等）
+   ============================================================ */
+
+/* ---------- 登录页 ---------- */
+.login-page {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #eef2f7 0%, #dbe3ef 100%);
+  padding: 20px;
+}
+.login-box {
+  width: 400px; max-width: 100%;
+  background: var(--panel);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 32px 34px;
+}
+.login-brand { text-align: center; margin-bottom: 20px; }
+.login-brand svg { width: 40px; height: 40px; color: var(--primary); margin-bottom: 8px; }
+.login-brand h1 { font-size: 18px; color: var(--text); }
+
+/* ---------- 工作台 ---------- */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } }
+.warn-list { list-style: none; margin: 0; padding: 0; }
+.warn-list li {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+}
+.warn-list li:last-child { border-bottom: none; }
+.quick-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ---------- 排班计划 ---------- */
+.period-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.period-current { font-size: 15px; font-weight: 600; text-align: center; }
+.period-current small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+.config-check-list { list-style: none; margin: 0; padding: 0; font-size: 13.5px; }
+.config-check-list li { padding: 6px 0; border-bottom: 1px dashed var(--border); display: flex; align-items: center; gap: 8px; }
+.config-check-list li:last-child { border-bottom: none; }
+.config-check-list .ok { color: var(--success); }
+.config-check-list .bad { color: var(--warning); }
+.status-chips { display: flex; gap: 10px; flex-wrap: wrap; }
+.status-chip {
+  display: flex; flex-direction: column; align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 18px;
+  background: #f8fafc;
+}
+.status-chip .chip-value { font-size: 18px; font-weight: 700; }
+.status-chip .chip-label { font-size: 12px; color: var(--muted); }
+
+/* ---------- 排班结果：大网格 ---------- */
+.schedule-wrap { overflow: auto; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); }
+table.schedule-grid { border-collapse: separate; border-spacing: 0; font-size: 12.5px; min-width: 100%; }
+.schedule-grid th, .schedule-grid td {
+  border: 1px solid var(--border);
+  padding: 5px 6px;
+  text-align: center;
+  white-space: nowrap;
+  min-width: 46px;
+}
+.schedule-grid thead th {
+  background: #f8fafc;
+  color: var(--text-secondary);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.schedule-grid thead th.date-head { min-width: 46px; }
+.schedule-grid thead th .weekday { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.schedule-grid .sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  text-align: left;
+  min-width: 96px;
+  max-width: 160px;
+  white-space: nowrap;
+}
+.schedule-grid thead .sticky-col { z-index: 5; background: #f8fafc; text-align: center; min-width: 96px; }
+.schedule-grid .weekend { background: #f6f8fb; }
+.schedule-grid thead .weekend { background: #eef2f8; }
+.schedule-grid .month-boundary { border-left: 2px solid var(--border-strong); }
+.schedule-grid .today { background: #fff7e6; }
+.schedule-grid thead .today { background: #fef3c7; color: #92400e; }
+.schedule-grid tbody tr:hover td { background: #f4f8ff; }
+.schedule-grid tbody tr:hover td.sticky-col { background: #eef4ff; }
+
+.schedule-cell { display: block; width: 100%; }
+.cell-early { background: #dbeafe; color: #1d4ed8; }
+.cell-middle { background: #fef3c7; color: #b45309; }
+.cell-night { background: #e0e7ff; color: #4338ca; }
+.cell-rest { background: #f1f2f4; color: #6b7280; }
+.schedule-grid td.cell-early, .schedule-grid td.cell-middle,
+.schedule-grid td.cell-night, .schedule-grid td.cell-rest { border-radius: 0; }
+
+.preview-box { position: relative; margin-bottom: 16px; }
+.preview-watermark {
+  position: absolute; top: 12px; right: 16px; z-index: 10;
+  background: rgba(180, 83, 9, 0.92);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.schedule-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); }
+.schedule-legend .legend-item { display: flex; align-items: center; gap: 6px; }
+.schedule-legend .legend-swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+/* ---------- 导入页 ---------- */
+.import-format-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.import-format-table th, .import-format-table td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  text-align: left;
+}
+.import-format-table th { background: #f8fafc; color: var(--muted); font-weight: 600; }
+.upload-zone {
+  border: 1.5px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 22px;
+  text-align: center;
+  color: var(--muted);
+  background: #fafbfd;
+  margin-bottom: 12px;
+}
+.upload-zone svg { width: 34px; height: 34px; color: #9ca3af; margin-bottom: 6px; }
+.import-summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.import-summary .summary-item {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 13px;
+}
+.import-summary .summary-count { font-size: 18px; font-weight: 700; }
+.import-summary .ok .summary-count { color: var(--success); }
+.import-summary .bad .summary-count { color: var(--danger); }
+
+/* ---------- 操作日志 JSON ---------- */
+.json-block {
+  background: #0f172a;
+  color: #d7e2f4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+}
+.json-empty { color: var(--muted); font-size: 13px; }
+
+/* ---------- 排序表头 ---------- */
+th.sortable a { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); }
+th.sortable a:hover { color: var(--primary); text-decoration: none; }
+th.sortable a.current { color: var(--primary); font-weight: 600; }
+
+/* ---------- 个人周期日历 ---------- */
+.cal-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.cal-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 6px; margin-bottom: 6px; font-weight: 600; color: var(--text-secondary); font-size: 13px;
+}
+.cal-weekdays span { padding: 4px; text-align: center; }
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
+}
+.cal-cell {
+  min-height: 92px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 8px; background: var(--panel); display: flex; flex-direction: column; gap: 4px;
+}
+.cal-cell.cal-out { background: #f8f9fc; opacity: 0.7; }
+.cal-cell.cal-future { background: #fbfcfe; }
+.cal-cell.cal-today { border: 2px solid var(--primary); }
+.cal-day { font-size: 12px; color: var(--text-secondary); }
+.cal-remark { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-edit-btn { align-self: flex-start; margin-top: auto; padding: 1px 6px; font-size: 12px; }
+.cal-plan-note { font-size: 11px; font-weight: 400; }
+.cal-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600;
+}
+.cal-early { background: #dbeafe; color: #1d4ed8; }
+.cal-middle { background: #dcfce7; color: #15803d; }
+.cal-night { background: #ede9fe; color: #6d28d9; }
+.cal-rest { background: #f1f5f9; color: #475569; }
+.cal-leave { background: #fef3c7; color: #b45309; }
+.cal-sick { background: #fee2e2; color: #b91c1c; }
+.cal-marriage { background: #fce7f3; color: #be185d; }
+.cal-other { background: #e2e8f0; color: #334155; }
+.cal-none { background: transparent; border: 1px dashed var(--border); color: var(--muted); }
+
+/* ============================================================
+   页面级增强 v2（登录页、工作台、日历/看板响应式与打印友好）
+   ============================================================ */
+
+/* 登录页：简洁专业，突出表单 */
+.login-page {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #f5f7fb 0%, #eef2f8 100%); padding: 32px 16px;
+}
+.login-card, .login-box {
+  width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 26px;
+}
+.login-brand { text-align: center; margin-bottom: 20px; }
+.login-brand h1 { font-size: 19px; margin: 0 0 4px; }
+.login-brand p { color: var(--muted); font-size: 13px; margin: 0; }
+.login-card .form-row, .login-card .field, .login-box .field { margin-bottom: 14px; }
+.login-card .btn-primary, .login-box .btn-primary { width: 100%; min-height: 40px; }
+
+/* 工作台统计卡片：关键数据优先 */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.stat-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow-sm);
+}
+.stat-card .stat-value { font-variant-numeric: tabular-nums; }
+
+/* 表格：宽表滚动容器与黏性表头 */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll .table { min-width: 640px; }
+.table { font-variant-numeric: tabular-nums; }
+
+/* 个人日历在小屏仍可读：横向滚动兜底 */
+.cal-scroll { overflow-x: auto; }
+@media (max-width: 900px) {
+  .content { padding: 16px; }
+  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
+}
+@media (max-width: 600px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .card { padding: 14px; }
+  .table-scroll .table { min-width: 520px; }
+}
+
+/* 首页排班人数趋势图（零依赖 SVG） */
+.trend-chart { width: 100%; position: relative; }
+.trend-chart #trend-chart { width: 100%; overflow-x: auto; }
+.trend-chart-svg { width: 100%; height: auto; display: block; }
+.trend-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 12px;
+  max-height: 84px; overflow-y: auto;
+  margin-top: 8px; padding-right: 4px;
+}
+.trend-legend-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid #e5e7eb; background: #fff; border-radius: 999px;
+  padding: 2px 10px; font-size: 12px; color: #374151;
+}
+.trend-tooltip {
+  position: absolute; z-index: 5; min-width: 132px; max-width: 280px;
+  max-height: 220px; overflow-y: auto;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(17, 24, 39, 0.92); color: #f9fafb;
+  font-size: 12px; line-height: 1.6; pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.trend-tooltip-title { font-weight: 600; margin-bottom: 2px; }
+.trend-tooltip-row { white-space: nowrap; }
+.trend-legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+/* 个人信息看板：姓名可点击进入该职工排班日历 */
+.person-link { color: #2563eb; text-decoration: none; font-weight: 500; cursor: pointer; }
+.person-link:hover { text-decoration: underline; }
+.person-link:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; border-radius: 3px; }
+.person-link-hint { margin-left: 6px; font-size: 12px; }
+
+/* 班次看板“添加人员”页：按班组分组，重点班组高亮 */
+.candidate-group { border-bottom: 1px dashed #e5e7eb; padding: 10px 0; }
+.candidate-group:last-child { border-bottom: none; }
+.candidate-group-focus { background: #f8fafc; border-radius: 8px; padding-left: 10px; padding-right: 10px; }
+.candidate-group-title { font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.candidate-people { display: flex; flex-wrap: wrap; gap: 8px; }

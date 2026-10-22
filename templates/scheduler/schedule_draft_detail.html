@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block title %}排班草稿 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 排班管理 / <a href="{% url 'scheduler:schedule_plan' %}">排班计划</a> / 排班草稿</div>{% endblock %}
+{% block page_title %}排班草稿 · {{ draft.team.name }} · {{ draft.shift_config.get_shift_name_display }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>
+      <span class="shift-tag {% if draft.shift_config.shift_name == 'early' %}shift-early{% elif draft.shift_config.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ draft.shift_config.get_shift_name_display }}</span>
+      {{ draft.team.organization.name }} / {{ draft.team.name }}
+      {% if draft.status == "confirmed" %}<span class="badge badge-success">已确认</span>{% else %}<span class="badge badge-warning">草稿</span>{% endif %}
+    </h2>
+    <p class="page-desc">
+      周期 {{ draft.period_start|date:"Y-m-d" }} ~ {{ draft.period_end|date:"Y-m-d" }} · 批次 {{ draft.batch_id }}
+      · 创建人 {{ draft.created_by.username }} · 创建于 {{ draft.created_at|date:"Y-m-d H:i" }}
+      {% if draft.confirmed_at %}· 确认于 {{ draft.confirmed_at|date:"Y-m-d H:i" }}（{{ draft.confirmed_by.username }}）{% endif %}
+    </p>
+  </div>
+  <div>
+    <a class="btn btn-sm" href="{% url 'scheduler:schedule_results' %}">排班结果</a>
+    <a class="btn btn-sm" href="{% url 'organization:shift_config_edit' draft.shift_config_id %}">返回班次配置</a>
+  </div>
+</div>
+
+{% if draft.status != "confirmed" %}
+<div class="alert alert-warning">
+  <strong>草稿待确认：</strong>确认前系统会重新检查当前配置、职工在职状态、岗位资格、排班周期与已有正式排班冲突，
+  任一变化都会阻止确认并要求重新生成草稿。确认后在单个事务中写入正式排班记录，请先核对下方明细。
+</div>
+{% endif %}
+
+<div class="import-summary">
+  <div class="summary-item ok"><span class="summary-count">{{ summary.total_shift_deviation }}</span> 总班数偏差（最大 {{ summary.max_shift_deviation }}）</div>
+  <div class="summary-item"><span class="summary-count">{{ draft.daily_worker_count }}</span> 每日要求人数（{{ draft.mode|yesno:"人多模式,人少模式" }}）</div>
+  <div class="summary-item"><span class="summary-count">{{ summary.rest_quality.windows_with_2_block }}/{{ summary.rest_quality.total_windows }}</span> 10天窗口含连续2天休息</div>
+  <div class="summary-item"><span class="summary-count">{{ summary.max_rest_run }}</span> 全员最长连续休息（上限 {{ summary.max_consecutive_rest_days }} 天）</div>
+  <div class="summary-item"><span class="summary-count">{{ summary.max_work_run }}</span> 全员最长连续工作</div>
+</div>
+<p class="field-help">{{ summary.boundary_note }}</p>
+
+<div class="card">
+  <div class="card-title">岗位要求快照（每日精确人数）</div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>岗位</th><th class="num">要求人数</th></tr></thead>
+      <tbody>
+        {% for pos, count in position_requirements.items %}
+        <tr><td><span class="badge badge-info">{{ pos }}</span></td><td class="num">{{ count }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="cell-muted">未配置特殊岗位人数。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">每日排班明细 <span class="card-title-note">{{ dates|length }} 天 × {{ rows|length }} 人</span></div>
+  <div class="schedule-legend">
+    <span class="legend-item"><span class="legend-dot dot-work"></span>上班（含岗位）</span>
+    <span class="legend-item"><span class="legend-dot dot-rest"></span>休息</span>
+  </div>
+  <div class="schedule-wrap">
+    <table class="schedule-grid">
+      <thead>
+        <tr>
+          <th class="sticky-col">职工编号</th>
+          <th class="sticky-col">姓名</th>
+          <th class="sticky-col num">目标/实际</th>
+          {% for d in dates %}
+          <th class="date-head {% if d.is_weekend %}weekend{% endif %} {% if d.is_month_boundary %}month-boundary{% endif %}" title="{{ d|date:'Y-m-d' }}">{{ d.day }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="sticky-col">{{ row.employee_no }}</td>
+          <td class="sticky-col">{{ row.name }}</td>
+          <td class="sticky-col num {% if row.actual > row.target %}cell-warn{% elif row.actual < row.target %}cell-info{% endif %}">{{ row.actual }}/{{ row.target }}</td>
+          {% for cell in row.cells %}
+          <td class="{% if cell.shift_type == 'rest' %}cell-rest{% else %}cell-work{% endif %}" title="{% if cell.shift_type != 'rest' %}{{ cell.position|default:'未分配岗位' }}{% else %}休息{% endif %}">
+            {% if cell.shift_type != 'rest' %}
+              <span class="badge badge-info">{{ cell.position|default:"未分配岗位" }}</span>
+            {% else %}<span class="cell-muted">休</span>{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if conflict_report %}
+<div class="card">
+  <div class="card-title">正式排班冲突明细 <span class="card-title-note">共 {{ conflict_report.total }} 条（同班组、同周期、已确认/已发布记录）</span></div>
+  <div class="alert alert-warning">
+    本草稿与既有正式排班记录存在重叠。系统<strong>不会自动删除</strong>任何记录：
+    确认保存后，旧版本将自动标记为「已作废（保留历史）」，其记录不再计入当前有效排班，
+    随后写入本草稿形成新的当前有效版本。来源不明的冲突仍会阻止确认。
+    <div style="margin-top: 6px;">冲突来源批次：
+      {% for b in conflict_report.source_batches %}<span class="badge badge-warning">{{ b.batch_id }}（{{ b.count }} 条）</span> {% endfor %}
+    </div>
+  </div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="num">职工ID</th><th>职工编号</th><th>姓名</th><th>日期</th><th>班组</th>
+          <th class="num">正式记录ID</th><th>所属批次</th><th>原班次</th><th>草稿班次/岗位</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in conflict_report.samples %}
+        <tr>
+          <td class="num">{{ item.employee_id }}</td>
+          <td>{{ item.employee_no }}</td>
+          <td>{{ item.name }}</td>
+          <td>{{ item.work_date|date:"Y-m-d" }}</td>
+          <td>{{ item.team }}</td>
+          <td class="num">{{ item.record_id }}</td>
+          <td class="cell-muted">{{ item.batch_id }}</td>
+          <td>{{ item.shift_type }}</td>
+          <td>{{ item.draft_shift_type }}{% if item.draft_position %} / {{ item.draft_position }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="field-help">仅展示前 {{ conflict_report.samples|length }} 条（共 {{ conflict_report.total }} 条）。</p>
+  <form method="post" class="form" data-guard-submit
+        data-confirm="确认保存本草稿？确认成功后，上表旧版本将自动作废（记录保留为「已作废」，不删除），本草稿成为该周期唯一有效版本。">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="confirm">
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">确认保存（自动作废旧版本）</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+{% if draft.status != "confirmed" %}
+<div class="card">
+  <div class="card-title">确认保存</div>
+  <p class="field-help">确认后将在单个数据库事务中写入 {{ rows|length }} × {{ dates|length }} 条正式排班记录（含休息日），
+    并更新批次状态；保存前会再次执行全部校验，失败将整体回滚。</p>
+  <form method="post" class="form" data-guard-submit data-confirm="确认保存该排班草稿？确认时若同队组同周期已有有效版本，将自动作废旧版本（记录保留）。">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="confirm">
+    <div class="form-actions">
+      <button type="submit" class="btn btn-success">确认保存排班</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,178 @@
+name: Deploy Django
+
+# 自动部署：仅在 CI 工作流于 main 分支成功后运行；也支持手动触发。
+# 设计要点：
+#   - 只部署 CI 已通过的提交（workflow_run.head_sha）；
+#   - 部署前记录当前 SHA，健康检查失败自动回滚代码；
+#   - 默认拒绝执行待应用迁移；仅手动触发且显式勾选 allow_migrations 时，
+#     先 mysqldump 备份再迁移；
+#   - 不执行任何排班业务操作；Secrets 为空时保留服务器现有 /etc/stiding.env。
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "要部署的提交 SHA（留空则使用当前 main 分支 HEAD）"
+        required: false
+        default: ""
+      allow_migrations:
+        description: "允许执行待应用的数据库迁移（会先备份数据库）"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 部署到生产服务器
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # 自动触发时必须 CI 成功且来自 main；手动触发则直接允许
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    steps:
+      - name: 计算目标提交
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SHA="${{ inputs.sha }}"
+            [ -z "$SHA" ] && SHA="${{ github.sha }}"
+            ALLOW="${{ inputs.allow_migrations }}"
+          else
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            ALLOW="false"
+          fi
+          case "$SHA" in
+            *[!0-9a-f]*|"") echo "::error::非法提交 SHA: $SHA"; exit 1 ;;
+          esac
+          [ ${#SHA} -ne 40 ] && { echo "::error::提交 SHA 长度不正确: $SHA"; exit 1; }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "allow_migrations=$ALLOW" >> "$GITHUB_OUTPUT"
+          echo "目标提交: $SHA（允许迁移: $ALLOW）"
+
+      - name: 部署到服务器（备份→迁移门禁→重启→健康检查→失败回滚）
+        uses: appleboy/ssh-action@master
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          ALLOW_MIGRATIONS: ${{ steps.target.outputs.allow_migrations }}
+          SM_DB_PASSWORD: ${{ secrets.SM_DB_PASSWORD }}
+          SM_DJANGO_SECRET_KEY: ${{ secrets.SM_DJANGO_SECRET_KEY }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_KEY }}
+          envs: TARGET_SHA,ALLOW_MIGRATIONS,SM_DB_PASSWORD,SM_DJANGO_SECRET_KEY
+          script: |
+            set -e
+            APP_DIR=/home/ubuntu/Stiding_System
+            cd "$APP_DIR"
+
+            echo "== 1) 记录当前版本 =="
+            PREV_SHA=$(git rev-parse HEAD)
+            echo "当前版本: $PREV_SHA"
+            echo "目标版本: $TARGET_SHA"
+
+            echo "== 2) 拉取目标提交（只更新代码，不触碰持久化文件） =="
+            git fetch origin main --prune
+            git cat-file -e "${TARGET_SHA}^{commit}" || { echo "::error::目标提交不存在"; exit 1; }
+            git reset --hard "$TARGET_SHA"
+            git rev-parse HEAD | grep -q "$TARGET_SHA" || { echo "::error::代码未切换到目标提交"; exit 1; }
+
+            echo "== 3) 服务器环境变量（默认保留现有 /etc/stiding.env，绝不覆盖生产配置） =="
+            if [ ! -f /etc/stiding.env ]; then
+              echo "!! 服务器缺少 /etc/stiding.env，使用 Secrets 初始化"
+              sudo bash -c "cat > /etc/stiding.env <<'EOF'
+            DJANGO_SECRET_KEY=$SM_DJANGO_SECRET_KEY
+            DJANGO_DEBUG=0
+            DJANGO_ALLOWED_HOSTS=stiding.qizhang2004.cn,127.0.0.1,localhost
+            DB_NAME=stiding
+            DB_USER=django
+            DB_PASSWORD=$SM_DB_PASSWORD
+            DB_HOST=localhost
+            DB_PORT=3306
+            EOF"
+            else
+              echo "保留现有 /etc/stiding.env（不覆盖生产配置）"
+            fi
+
+            echo "== 4) 安装依赖 =="
+            source .venv/bin/activate
+            export DJANGO_SETTINGS_MODULE=config.settings
+            set -a
+            source /etc/stiding.env
+            set +a
+            pip install -q -r requirements.txt
+            python manage.py check
+
+            echo "== 5) 数据库迁移门禁 =="
+            PENDING=$(python manage.py showmigrations --plan | grep -c "\[ \]" || true)
+            echo "待应用迁移数: $PENDING"
+            if [ "$PENDING" -gt 0 ]; then
+              if [ "$ALLOW_MIGRATIONS" != "true" ]; then
+                echo "::error::存在 $PENDING 个待应用迁移，已停止部署。请人工审核迁移内容后，手动触发 Deploy 并勾选 allow_migrations。"
+                exit 2
+              fi
+              mkdir -p /home/ubuntu/backups
+              BACKUP="/home/ubuntu/backups/stiding-$(date +%Y%m%d-%H%M%S).sql"
+              echo "备份数据库到 $BACKUP"
+              mysqldump --single-transaction --quick --no-tablespaces \
+                -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" > "$BACKUP"
+              [ -s "$BACKUP" ] || { echo "::error::数据库备份失败，已停止部署"; exit 3; }
+              python manage.py migrate --noinput
+            else
+              echo "无待应用迁移，跳过 migrate"
+            fi
+
+            echo "== 6) 部署前数据指纹（只读，用于确认部署未写入业务数据） =="
+            python manage.py shell -c "from apps.scheduler.models import ScheduleRecord, ScheduleBatch; print('BEFORE records', ScheduleRecord.objects.count(), 'batches', ScheduleBatch.objects.count())"
+
+            echo "== 7) 收集静态文件并重启服务 =="
+            python manage.py collectstatic --noinput >/dev/null
+            sudo systemctl restart stiding
+
+            echo "== 8) 健康检查 =="
+            CODE=""
+            for i in $(seq 1 20); do
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/accounts/login/ || true)
+              [ "$CODE" = "200" ] && break
+              sleep 2
+            done
+            echo "健康检查 HTTP: $CODE"
+            if [ "$CODE" != "200" ]; then
+              echo "::error::健康检查失败，开始回滚代码到 $PREV_SHA"
+              git reset --hard "$PREV_SHA"
+              pip install -q -r requirements.txt || true
+              python manage.py collectstatic --noinput >/dev/null || true
+              sudo systemctl restart stiding || true
+              sleep 3
+              echo "回滚后 HTTP: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/accounts/login/ || true)"
+              echo "::error::部署失败并已回滚代码；数据库迁移（如已执行）不会自动回滚，请人工确认。"
+              exit 4
+            fi
+
+            echo "== 9) 部署结果 =="
+            python manage.py shell -c "from apps.scheduler.models import ScheduleRecord, ScheduleBatch; print('AFTER records', ScheduleRecord.objects.count(), 'batches', ScheduleBatch.objects.count())"
+            DEPLOYED=$(git rev-parse HEAD)
+            echo "DEPLOYED_SHA=$DEPLOYED"
+            systemctl show stiding -p ActiveEnterTimestamp
+
+      - name: 外部 HTTPS 健康检查
+        run: |
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 https://stiding.qizhang2004.cn/accounts/login/ || true)
+            [ "$CODE" = "200" ] && { echo "公网登录页 HTTP 200"; exit 0; }
+            sleep 3
+          done
+          echo "::error::公网健康检查失败（最后状态码 $CODE）"
+          exit 1

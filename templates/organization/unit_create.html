@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}新增队组 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:unit_list' %}">队组管理</a> / 新增队组</div>{% endblock %}
+{% block page_title %}新增队组{% endblock %}
+
+{% block content %}
+<div class="alert alert-info">
+  创建队组时将同时创建两个账号：<strong>队组管理员</strong>（可管理本队组业务与成员账号）与
+  <strong>普通成员通用账号</strong>（本队组只读看板账号），两个账号自动绑定到新队组。
+  密码留空则由系统生成随机密码，创建成功后仅显示一次。
+</div>
+
+<form method="post" class="form" data-guard-submit>
+  {% csrf_token %}
+  <div class="card-title">第一步 · 队组信息</div>
+  <div class="form-grid">
+    <div class="field">
+      <label for="{{ form.name.id_for_label }}">{{ form.name.label }}<span class="required">*</span></label>
+      {{ form.name }}
+      {% for error in form.name.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="field">
+      <label for="{{ form.code.id_for_label }}">{{ form.code.label }}<span class="required">*</span></label>
+      {{ form.code }}
+      {% for error in form.code.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+    </div>
+    <div class="field">
+      <label for="{{ form.is_active.id_for_label }}">{{ form.is_active.label }}</label>
+      {{ form.is_active }}
+    </div>
+  </div>
+
+  <div class="card-title" style="margin-top: 8px;">第二步 · 队组管理员账号</div>
+  <div class="form-grid">
+    {% for f in form %}
+      {% if f.name == 'admin_username' or f.name == 'admin_password' or f.name == 'admin_password2' %}
+      <div class="field{% if f.errors %} field-invalid{% endif %}">
+        <label for="{{ f.id_for_label }}">{{ f.label }}<span class="required">*</span></label>
+        {{ f }}
+        {% if f.help_text %}<p class="field-help">{{ f.help_text }}</p>{% endif %}
+        {% for error in f.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="card-title" style="margin-top: 8px;">第三步 · 普通成员通用账号</div>
+  <div class="form-grid">
+    {% for f in form %}
+      {% if f.name == 'member_username' or f.name == 'member_password' or f.name == 'member_password2' %}
+      <div class="field{% if f.errors %} field-invalid{% endif %}">
+        <label for="{{ f.id_for_label }}">{{ f.label }}<span class="required">*</span></label>
+        {{ f }}
+        {% if f.help_text %}<p class="field-help">{{ f.help_text }}</p>{% endif %}
+        {% for error in f.errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if form.non_field_errors %}
+  <div class="form-errors">
+    {% for error in form.non_field_errors %}<p class="field-error">{{ error }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary">下一步（确认摘要）</button>
+    <a class="btn" href="{% url 'organization:unit_list' %}">取消</a>
+  </div>
+</form>
+{% endblock %}

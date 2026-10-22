@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}编辑账号 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / <a href="{% url 'accounts:user_list' %}">账号管理</a> / 编辑 {{ profile.user.username }}</div>{% endblock %}
+{% block page_title %}编辑账号{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 640px;">
+  <div class="card-title">账号：{{ profile.user.username }}</div>
+  <form method="post" class="form" data-guard-submit>
+    {% csrf_token %}
+    {% include "includes/_form_fields.html" %}
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">保存</button>
+      <a class="btn" href="{% url 'accounts:user_detail' profile.pk %}">取消</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

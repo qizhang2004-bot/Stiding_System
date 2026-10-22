@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}{{ work_date|date:"Y-m-d" }} {{ shift_label }} 人员名单 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'accounts:home' %}">首页</a> / <a href="{% url 'scheduler:shift_board' %}">排班日历</a> / {{ work_date|date:"Y-m-d" }} {{ shift_label }}</div>{% endblock %}
+{% block page_title %}{{ work_date|date:"Y-m-d" }} · {{ shift_label }} 人员名单{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2><span class="shift-tag shift-{{ shift_name }}">{{ shift_label }}</span> {{ work_date|date:"Y年n月j日" }}
+      <span class="badge badge-info">当前 {{ total }} 人</span>
+    </h2>
+    <p class="page-desc">{% if org %}队组：{{ org.name }}{% endif %}{% if team %} · 班组：{{ team.name }}{% endif %}。{% if is_archive_view %}<span class="badge badge-warning">历史归档（只读）</span>{% else %}名单来自数据库中的当前有效排班记录，可按班组添加或删除人员。{% endif %}</p>
+  </div>
+  <div>
+    {% if can_edit %}<a class="btn btn-primary btn-sm" href="{% url 'scheduler:shift_board_add' work_date|date:'Y-m-d' shift_name %}{% if team %}?focus={{ team.pk }}{% endif %}">添加人员</a>{% endif %}
+    <a class="btn btn-sm" href="{% url 'scheduler:shift_board' %}{% if org %}?organization={{ org.pk }}{% endif %}{% if team %}{% if org %}&{% else %}?{% endif %}team={{ team.pk }}{% endif %}">返回排班日历</a>
+  </div>
+</div>
+
+{% for group in groups %}
+<div class="card">
+  <div class="card-title">{{ group.name }}<span class="card-title-note">{{ group.people|length }} 人</span></div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>职工编号</th><th>姓名</th><th>岗位</th><th>班次</th><th class="actions">操作</th></tr></thead>
+      <tbody>
+        {% for row in group.people %}
+        <tr>
+          <td>{{ row.employee_no }}</td>
+          <td>{{ row.name }}</td>
+          <td>{% if row.position %}{{ row.position }}{% else %}<span class="cell-muted">普工</span>{% endif %}</td>
+          <td><span class="badge badge-info">{{ row.shift_label }}</span><span class="hidden">{{ row.shift_type }}</span></td>
+          <td class="actions">
+            {% if can_edit %}
+            <form method="post" action="{% url 'scheduler:shift_board_change' row.record_id %}" class="inline-form row-actions">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <label class="sr-only" for="target-{{ row.record_id }}">改班目标</label>
+              <select class="input input-sm" name="target_shift" id="target-{{ row.record_id }}">
+                {% for value, label in shift_choices %}
+                <option value="{{ value }}" {% if value == row.shift_type %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-sm">改班</button>
+            </form>
+            <form method="post" action="{% url 'scheduler:shift_board_remove' row.record_id %}" class="inline-form" data-guard-submit
+                  data-confirm="删除 {{ row.name }} 在 {{ work_date|date:'Y-m-d' }} 的排班记录？只影响这一条记录。">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm btn-danger">删除</button>
+            </form>
+            {% else %}<span class="cell-muted">只读</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% empty %}
+<div class="card">{% include "includes/_empty.html" with title="该班次当日没有排班人员" description="可通过右上角“添加人员”为该日期班次添加人员。" %}</div>
+{% endfor %}
+{% endblock %}

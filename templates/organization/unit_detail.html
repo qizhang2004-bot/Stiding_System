@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}{{ unit.name }} - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:unit_list' %}">队组管理</a> / {{ unit.name }}</div>{% endblock %}
+{% block page_title %}{{ unit.name }}{% endblock %}
+
+{% block content %}
+<div class="stat-grid" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));">
+  <div class="stat-card"><div class="stat-icon gray"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg></div><div><div class="stat-value">{{ team_count }}</div><div class="stat-label">班组</div></div></div>
+  <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg></div><div><div class="stat-value">{{ employee_count }}</div><div class="stat-label">职工</div></div></div>
+  <div class="stat-card"><div class="stat-icon {% if unit.is_active %}green{% else %}gray{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div><div><div class="stat-value" style="font-size:16px;">{% if unit.is_active %}启用{% else %}停用{% endif %}</div><div class="stat-label">状态</div></div></div>
+</div>
+
+<div class="card">
+  <div class="card-title">基本信息
+    <span>
+      <a class="btn btn-sm" href="{% url 'organization:unit_edit' unit.pk %}">编辑</a>
+      <form class="inline-form" method="post" action="{% url 'organization:unit_toggle' unit.pk %}"
+            data-confirm="{% if unit.is_active %}确认停用队组「{{ unit.name }}」？{% else %}确认重新启用队组「{{ unit.name }}」？{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="btn btn-sm {% if unit.is_active %}btn-danger{% else %}btn-success{% endif %}">
+          {% if unit.is_active %}停用{% else %}启用{% endif %}
+        </button>
+      </form>
+    </span>
+  </div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">队组名称</div><div class="detail-value">{{ unit.name }}</div></div>
+    <div class="detail-item"><div class="detail-label">队组编号</div><div class="detail-value">{{ unit.code }}</div></div>
+    <div class="detail-item"><div class="detail-label">状态</div><div class="detail-value">{% if unit.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">创建时间</div><div class="detail-value cell-muted">{{ unit.created_at|date:"Y-m-d H:i" }}</div></div>
+    <div class="detail-item"><div class="detail-label">更新时间</div><div class="detail-value cell-muted">{{ unit.updated_at|date:"Y-m-d H:i" }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">所属班组
+    <a class="btn btn-sm btn-primary" href="{% url 'organization:team_create' %}?organization={{ unit.pk }}">＋ 新增班组</a>
+  </div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>班组名称</th><th>班组编号</th><th class="num">职工数</th><th class="num">已启用配置</th><th>状态</th><th class="actions">操作</th></tr>
+      </thead>
+      <tbody>
+        {% for team in teams %}
+        <tr>
+          <td><a href="{% url 'organization:team_detail' team.pk %}">{{ team.name }}</a></td>
+          <td>{{ team.code }}</td>
+          <td class="num">{{ team.employee_count }}</td>
+          <td class="num">{{ team.active_configs }}/3</td>
+          <td>{% if team.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'organization:team_detail' team.pk %}">详情</a>
+            <a class="btn btn-sm" href="{% url 'organization:shift_config_list' %}?organization={{ unit.pk }}&team={{ team.pk }}">班次配置</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">
+          {% include "includes/_empty.html" with title="暂无班组" description="在该队组下创建班组，系统会自动生成早/中/晚三条班次配置。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

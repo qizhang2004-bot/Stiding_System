@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}{{ team.name }} - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 组织管理 / <a href="{% url 'organization:team_list' %}">班组管理</a> / {{ team.name }}</div>{% endblock %}
+{% block page_title %}{{ team.name }}{% endblock %}
+
+{% block content %}
+<div class="stat-grid" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));">
+  <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg></div><div><div class="stat-value">{{ employee_count }}</div><div class="stat-label">职工</div></div></div>
+  <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line></svg></div><div><div class="stat-value">{{ active_config_count }}/{{ config_count }}</div><div class="stat-label">已启用班次配置</div></div></div>
+  <div class="stat-card"><div class="stat-icon {% if team.is_active %}green{% else %}gray{% endif %}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div><div><div class="stat-value" style="font-size:16px;">{% if team.is_active %}启用{% else %}停用{% endif %}</div><div class="stat-label">状态</div></div></div>
+</div>
+
+<div class="card">
+  <div class="card-title">基本信息
+    <span>
+      <a class="btn btn-sm" href="{% url 'organization:team_edit' team.pk %}">编辑</a>
+      <a class="btn btn-sm" href="{% url 'organization:shift_config_list' %}?organization={{ team.organization_id }}&team={{ team.pk }}">班次配置</a>
+      <form class="inline-form" method="post" action="{% url 'organization:team_toggle' team.pk %}"
+            data-confirm="{% if team.is_active %}确认停用班组「{{ team.name }}」？{% else %}确认重新启用班组「{{ team.name }}」？{% endif %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" class="btn btn-sm {% if team.is_active %}btn-danger{% else %}btn-success{% endif %}">
+          {% if team.is_active %}停用{% else %}启用{% endif %}
+        </button>
+      </form>
+    </span>
+  </div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">班组名称</div><div class="detail-value">{{ team.name }}</div></div>
+    <div class="detail-item"><div class="detail-label">班组编号</div><div class="detail-value">{{ team.code }}</div></div>
+    <div class="detail-item"><div class="detail-label">所属队组</div><div class="detail-value"><a href="{% url 'organization:unit_detail' team.organization_id %}">{{ team.organization.name }}（{{ team.organization.code }}）</a></div></div>
+    <div class="detail-item"><div class="detail-label">状态</div><div class="detail-value">{% if team.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">创建时间</div><div class="detail-value cell-muted">{{ team.created_at|date:"Y-m-d H:i" }}</div></div>
+    <div class="detail-item"><div class="detail-label">更新时间</div><div class="detail-value cell-muted">{{ team.updated_at|date:"Y-m-d H:i" }}</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">班次配置概况 <span class="card-title-note">“待配置”表示尚未设置真实参数，不会用于正式排班</span></div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>班次</th><th class="num">每日用工人数</th><th class="num">连休范围（天）</th>
+          <th class="num">排班目标班数</th><th class="num">岗位要求（项）</th><th>状态</th><th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for cfg in configs %}
+        <tr>
+          <td><span class="shift-tag {% if cfg.shift_name == 'early' %}shift-early{% elif cfg.shift_name == 'middle' %}shift-middle{% else %}shift-night{% endif %}">{{ cfg.get_shift_name_display }}</span></td>
+          <td class="num">{{ cfg.daily_worker_count }}</td>
+          <td class="num">{{ cfg.min_consecutive_rest_days }} ~ {{ cfg.max_consecutive_rest_days }}</td>
+          <td class="num">{{ cfg.required_shifts }}</td>
+          <td class="num">{{ cfg.position_requirements|length }}</td>
+          <td>{% if cfg.is_active %}<span class="badge badge-success">已启用</span>{% else %}<span class="badge badge-warning">待配置</span>{% endif %}</td>
+          <td class="actions"><a class="btn btn-sm" href="{% url 'organization:shift_config_edit' cfg.pk %}">配置</a></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">{% include "includes/_empty.html" with title="暂无班次配置" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">班组职工 <span class="card-title-note">最近 10 名</span>
+    <a class="btn btn-sm" href="{% url 'personnel:employee_list' %}?team={{ team.pk }}">查看全部</a>
+  </div>
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr><th>工号</th><th>姓名</th><th>岗位</th><th>班次</th><th>状态</th></tr>
+      </thead>
+      <tbody>
+        {% for emp in employees %}
+        <tr>
+          <td>{{ emp.employee_no }}</td>
+          <td><a href="{% url 'personnel:employee_detail' emp.pk %}">{{ emp.name }}</a></td>
+          <td>{{ emp.position|default:"-" }}</td>
+          <td>{{ emp.shift_config.get_shift_name_display|default:"-" }}</td>
+          <td>{% if emp.is_active %}<span class="badge badge-success">在岗</span>{% else %}<span class="badge badge-muted">停用</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5">{% include "includes/_empty.html" with title="暂无职工" %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

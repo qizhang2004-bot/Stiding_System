@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}日志详情 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 系统管理 / <a href="{% url 'auditlog:log_list' %}">操作日志</a> / 日志详情</div>{% endblock %}
+{% block page_title %}日志详情{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-title">基本信息</div>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="detail-label">操作时间</div><div class="detail-value">{{ log.created_at|date:"Y-m-d H:i:s" }}</div></div>
+    <div class="detail-item"><div class="detail-label">操作用户</div><div class="detail-value">{{ log.username|default:"-" }}</div></div>
+    <div class="detail-item"><div class="detail-label">模块</div><div class="detail-value"><span class="badge badge-info">{{ log.module }}</span></div></div>
+    <div class="detail-item"><div class="detail-label">操作类型</div><div class="detail-value">{{ log.action }}</div></div>
+    <div class="detail-item"><div class="detail-label">操作对象</div><div class="detail-value">{{ log.target_type|default:"-" }}{% if log.target_id %} #{{ log.target_id }}{% endif %}</div></div>
+    <div class="detail-item"><div class="detail-label">IP 地址</div><div class="detail-value">{{ log.ip_address|default:"-" }}</div></div>
+  </div>
+  <div class="detail-item" style="margin-top: 12px;"><div class="detail-label">操作描述</div><div class="detail-value">{{ log.description }}</div></div>
+</div>
+
+<div class="dashboard-grid">
+  <div class="card">
+    <div class="card-title">操作前数据</div>
+    {% if before_pretty %}<pre class="json-block">{{ before_pretty }}</pre>{% else %}<p class="json-empty">无操作前数据快照。</p>{% endif %}
+  </div>
+  <div class="card">
+    <div class="card-title">操作后数据</div>
+    {% if after_pretty %}<pre class="json-block">{{ after_pretty }}</pre>{% else %}<p class="json-empty">无操作后数据快照。</p>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <a class="btn" href="{% url 'auditlog:log_list' %}">返回列表</a>
+</div>
+{% endblock %}

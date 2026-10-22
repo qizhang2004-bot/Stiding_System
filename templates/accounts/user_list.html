@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}账号管理 - Stiding 排班系统{% endblock %}
+
+{% block breadcrumb %}<div class="breadcrumb"><a href="{% url 'core:dashboard' %}">工作台</a> / 账号管理</div>{% endblock %}
+{% block page_title %}账号管理{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h2>账号管理</h2>
+    <p class="page-desc">管理全系统账号的角色与所属队组。保护规则：不能停用或移除系统中最后一个有效超级管理员；队组管理员与普通成员必须绑定队组。</p>
+  </div>
+  <a class="btn btn-primary" href="{% url 'accounts:user_create' %}">＋ 创建账号</a>
+</div>
+
+<div class="card">
+  <form method="get" class="filter-bar">
+    <div class="filter-item wide">
+      <label for="q">登录账号</label>
+      <input class="input" type="search" name="q" id="q" value="{{ q }}" placeholder="输入登录账号搜索">
+    </div>
+    <div class="filter-item">
+      <label for="role">角色</label>
+      <select class="input" name="role" id="role">
+        <option value="">全部角色</option>
+        {% for value, label in roles %}
+        <option value="{{ value }}" {% if role == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="organization">所属队组</label>
+      <select class="input" name="organization" id="organization">
+        <option value="">全部队组</option>
+        {% for o in orgs %}
+        <option value="{{ o.pk }}" {% if org_id == o.pk|stringformat:"s" %}selected{% endif %}>{{ o.name }}（{{ o.code }}）</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="filter-item">
+      <label for="status">状态</label>
+      <select class="input" name="status" id="status">
+        <option value="">全部</option>
+        <option value="active" {% if status == 'active' %}selected{% endif %}>启用</option>
+        <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>停用</option>
+      </select>
+    </div>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">查询</button>
+      <a class="btn" href="{% url 'accounts:user_list' %}">重置</a>
+    </div>
+  </form>
+</div>
+
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>登录账号</th>
+          <th>账号角色</th>
+          <th>所属队组</th>
+          <th>状态</th>
+          <th>创建时间</th>
+          <th>最近登录</th>
+          <th class="actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for profile in page_obj %}
+        <tr>
+          <td><a href="{% url 'accounts:user_detail' profile.pk %}">{{ profile.user.username }}</a></td>
+          <td>
+            {% if profile.role == 'super' %}<span class="badge badge-info">超级管理员</span>
+            {% elif profile.role == 'admin' %}<span class="badge badge-success">队组管理员</span>
+            {% else %}<span class="badge badge-muted">队组普通成员</span>{% endif %}
+          </td>
+          <td>{{ profile.organization.name|default:"-" }}</td>
+          <td>{% if profile.user.is_active %}<span class="badge badge-success">启用</span>{% else %}<span class="badge badge-danger">停用</span>{% endif %}</td>
+          <td class="cell-muted">{{ profile.user.date_joined|date:"Y-m-d H:i" }}</td>
+          <td class="cell-muted">{% if profile.user.last_login %}{{ profile.user.last_login|date:"Y-m-d H:i" }}{% else %}从未登录{% endif %}</td>
+          <td class="actions">
+            <a class="btn btn-sm" href="{% url 'accounts:user_detail' profile.pk %}">详情</a>
+            <a class="btn btn-sm" href="{% url 'accounts:user_edit' profile.pk %}">编辑</a>
+            <a class="btn btn-sm" href="{% url 'accounts:user_reset_password' profile.pk %}">重置密码</a>
+            <form class="inline-form" method="post" action="{% url 'accounts:user_toggle' profile.pk %}"
+                  data-confirm="{% if profile.user.is_active %}确认停用账号「{{ profile.user.username }}」？停用后该账号将无法登录。{% else %}确认恢复账号「{{ profile.user.username }}」？{% endif %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="btn btn-sm {% if profile.user.is_active %}btn-danger{% else %}btn-success{% endif %}">
+                {% if profile.user.is_active %}停用{% else %}恢复{% endif %}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">
+          {% include "includes/_empty.html" with title="暂无账号" description="点击右上角“创建账号”添加新账号。" %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% include "includes/_pagination.html" %}
+</div>
+{% endblock %}
